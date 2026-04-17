@@ -1,0 +1,29 @@
+{
+  "name": "cashmere-agent-sdk",
+  "version": "0.1.0",
+  "description": "Cashmere CCTP cross-chain USDC transfer SDK for EVM, Solana, Aptos, and Sui",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": ["dist", "SKILL.md"],
+  "scripts": {
+    "build": "tsc",
+    "clean": "rm -rf dist",
+    "prepublishOnly": "npm run clean && npm run build"
+  },
+  "dependencies": {
+    "viem": "^2.21.0",
+    "@solana/web3.js": "^1.95.0",
+    "@solana/spl-token": "^0.4.0",
+    "@coral-xyz/anchor": "^0.30.0",
+    "@aptos-labs/ts-sdk": "^1.33.0",
+    "@mysten/sui": "^1.16.0",
+    "bs58": "^6.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "MIT"
+}

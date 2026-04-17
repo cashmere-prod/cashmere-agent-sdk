@@ -1,0 +1,2217 @@
+{
+  "address": "5RsvKL6LFq6yEFiAXEwgYHAN3aLFypeB4AaafdeDnHqM",
+  "metadata": {
+    "name": "cashmere_cctp",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "Created with Anchor"
+  },
+  "instructions": [
+    {
+      "name": "get_fee",
+      "discriminator": [
+        115,
+        195,
+        235,
+        161,
+        25,
+        219,
+        60,
+        29
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "fee",
+          "type": "u64"
+        },
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ],
+      "returns": "u64"
+    },
+    {
+      "name": "initialize",
+      "discriminator": [
+        175,
+        175,
+        109,
+        31,
+        13,
+        152,
+        155,
+        237
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "custodian",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  109,
+                  105,
+                  116,
+                  116,
+                  101,
+                  114
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "owner",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "fee_collector_sol",
+          "type": "pubkey"
+        },
+        {
+          "name": "fee_collector_usdc",
+          "type": "pubkey"
+        },
+        {
+          "name": "gas_drop_collector_sol",
+          "type": "pubkey"
+        },
+        {
+          "name": "gas_drop_collector_usdc",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "set_fee_bp",
+      "discriminator": [
+        3,
+        94,
+        111,
+        144,
+        57,
+        169,
+        249,
+        157
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "owner",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "fee_bp",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "set_fee_collector",
+      "discriminator": [
+        143,
+        46,
+        10,
+        113,
+        121,
+        157,
+        245,
+        166
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "owner",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "fee_collector_sol",
+          "type": "pubkey"
+        },
+        {
+          "name": "fee_collector_usdc",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "set_gas_drop_collector",
+      "discriminator": [
+        42,
+        102,
+        165,
+        79,
+        81,
+        113,
+        53,
+        71
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "owner",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "gas_drop_collector_sol",
+          "type": "pubkey"
+        },
+        {
+          "name": "gas_drop_collector_usdc",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "set_max_native_gas_drop",
+      "discriminator": [
+        159,
+        19,
+        125,
+        93,
+        17,
+        244,
+        46,
+        174
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "owner",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "max_gas",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "set_max_usdc_gas_drop",
+      "discriminator": [
+        199,
+        17,
+        101,
+        29,
+        133,
+        209,
+        80,
+        28
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "owner",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "max_gas",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "set_paused",
+      "discriminator": [
+        91,
+        60,
+        125,
+        192,
+        176,
+        225,
+        166,
+        218
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "owner",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "paused",
+          "type": "bool"
+        }
+      ]
+    },
+    {
+      "name": "set_signer_key",
+      "discriminator": [
+        3,
+        33,
+        201,
+        254,
+        15,
+        8,
+        55,
+        21
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "owner",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "signer_key",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "transfer",
+      "discriminator": [
+        163,
+        52,
+        200,
+        231,
+        140,
+        3,
+        69,
+        186
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "owner_token_account",
+          "writable": true
+        },
+        {
+          "name": "message_sent_event_data",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "owner",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "fee_collector_sol_account",
+          "writable": true
+        },
+        {
+          "name": "fee_collector_usdc_account",
+          "writable": true
+        },
+        {
+          "name": "gas_drop_collector_sol_account",
+          "writable": true
+        },
+        {
+          "name": "gas_drop_collector_usdc_account",
+          "writable": true
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "custodian",
+          "docs": [
+            "This program's emitter authority.",
+            "",
+            "Seeds must be \\[\"emitter\"\\]."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  109,
+                  105,
+                  116,
+                  116,
+                  101,
+                  114
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "burn_token_mint",
+          "docs": [
+            "Circle-supported mint.",
+            "",
+            "Token Messenger Minter program's local token account."
+          ],
+          "writable": true,
+          "address": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+        },
+        {
+          "name": "burn_token_account",
+          "docs": [
+            "Temporary custody token account. This account will be closed at the end of this instruction.",
+            "It just acts as a conduit to allow this program to be the transfer initiator in the CCTP",
+            "message.",
+            "",
+            "Seeds must be \\[\"__custody\"\\]."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  95,
+                  95,
+                  99,
+                  117,
+                  115,
+                  116,
+                  111,
+                  100,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "local_token",
+          "docs": [
+            "",
+            "Mutable. Seeds must be \\[\"local_token\", mint\\] (CCTP Token Messenger Minter program)."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  111,
+                  99,
+                  97,
+                  108,
+                  95,
+                  116,
+                  111,
+                  107,
+                  101,
+                  110
+                ]
+              },
+              {
+                "kind": "const",
+                "value": [
+                  198,
+                  250,
+                  122,
+                  243,
+                  190,
+                  219,
+                  173,
+                  58,
+                  61,
+                  101,
+                  243,
+                  106,
+                  171,
+                  201,
+                  116,
+                  49,
+                  177,
+                  187,
+                  228,
+                  194,
+                  210,
+                  246,
+                  224,
+                  228,
+                  124,
+                  166,
+                  2,
+                  3,
+                  69,
+                  47,
+                  93,
+                  97
+                ]
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                166,
+                95,
+                201,
+                67,
+                65,
+                154,
+                90,
+                213,
+                144,
+                4,
+                47,
+                214,
+                124,
+                151,
+                145,
+                253,
+                1,
+                90,
+                207,
+                83,
+                165,
+                76,
+                200,
+                35,
+                237,
+                184,
+                255,
+                129,
+                185,
+                237,
+                114,
+                46
+              ]
+            }
+          }
+        },
+        {
+          "name": "token_messenger_minter_program",
+          "address": "CCTPiPYPc6AsJuwueEnWgSgucamXDZwBd53dQ11YiKX3"
+        },
+        {
+          "name": "message_transmitter_program",
+          "address": "CCTPmbSD7gX1bxKPAmg77w8oFzNFpaQiQUWD43TKaecd"
+        },
+        {
+          "name": "token_messenger_minter_event_authority",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  95,
+                  95,
+                  101,
+                  118,
+                  101,
+                  110,
+                  116,
+                  95,
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                166,
+                95,
+                201,
+                67,
+                65,
+                154,
+                90,
+                213,
+                144,
+                4,
+                47,
+                214,
+                124,
+                151,
+                145,
+                253,
+                1,
+                90,
+                207,
+                83,
+                165,
+                76,
+                200,
+                35,
+                237,
+                184,
+                255,
+                129,
+                185,
+                237,
+                114,
+                46
+              ]
+            }
+          }
+        },
+        {
+          "name": "message_transmitter",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  101,
+                  115,
+                  115,
+                  97,
+                  103,
+                  101,
+                  95,
+                  116,
+                  114,
+                  97,
+                  110,
+                  115,
+                  109,
+                  105,
+                  116,
+                  116,
+                  101,
+                  114
+                ]
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                166,
+                95,
+                201,
+                137,
+                219,
+                95,
+                93,
+                66,
+                117,
+                159,
+                58,
+                84,
+                96,
+                88,
+                239,
+                205,
+                205,
+                192,
+                191,
+                60,
+                24,
+                152,
+                7,
+                45,
+                142,
+                180,
+                93,
+                209,
+                216,
+                5,
+                8,
+                206
+              ]
+            }
+          }
+        },
+        {
+          "name": "token_messenger",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  111,
+                  107,
+                  101,
+                  110,
+                  95,
+                  109,
+                  101,
+                  115,
+                  115,
+                  101,
+                  110,
+                  103,
+                  101,
+                  114
+                ]
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                166,
+                95,
+                201,
+                67,
+                65,
+                154,
+                90,
+                213,
+                144,
+                4,
+                47,
+                214,
+                124,
+                151,
+                145,
+                253,
+                1,
+                90,
+                207,
+                83,
+                165,
+                76,
+                200,
+                35,
+                237,
+                184,
+                255,
+                129,
+                185,
+                237,
+                114,
+                46
+              ]
+            }
+          }
+        },
+        {
+          "name": "remote_token_messenger",
+          "docs": [
+            "Messenger Minter program)."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  109,
+                  111,
+                  116,
+                  101,
+                  95,
+                  116,
+                  111,
+                  107,
+                  101,
+                  110,
+                  95,
+                  109,
+                  101,
+                  115,
+                  115,
+                  101,
+                  110,
+                  103,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "destination_domain"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                166,
+                95,
+                201,
+                67,
+                65,
+                154,
+                90,
+                213,
+                144,
+                4,
+                47,
+                214,
+                124,
+                151,
+                145,
+                253,
+                1,
+                90,
+                207,
+                83,
+                165,
+                76,
+                200,
+                35,
+                237,
+                184,
+                255,
+                129,
+                185,
+                237,
+                114,
+                46
+              ]
+            }
+          }
+        },
+        {
+          "name": "token_minter",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  111,
+                  107,
+                  101,
+                  110,
+                  95,
+                  109,
+                  105,
+                  110,
+                  116,
+                  101,
+                  114
+                ]
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                166,
+                95,
+                201,
+                67,
+                65,
+                154,
+                90,
+                213,
+                144,
+                4,
+                47,
+                214,
+                124,
+                151,
+                145,
+                253,
+                1,
+                90,
+                207,
+                83,
+                165,
+                76,
+                200,
+                35,
+                237,
+                184,
+                255,
+                129,
+                185,
+                237,
+                114,
+                46
+              ]
+            }
+          }
+        },
+        {
+          "name": "token_messenger_minter_sender_authority",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  101,
+                  110,
+                  100,
+                  101,
+                  114,
+                  95,
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                166,
+                95,
+                201,
+                67,
+                65,
+                154,
+                90,
+                213,
+                144,
+                4,
+                47,
+                214,
+                124,
+                151,
+                145,
+                253,
+                1,
+                90,
+                207,
+                83,
+                165,
+                76,
+                200,
+                35,
+                237,
+                184,
+                255,
+                129,
+                185,
+                237,
+                114,
+                46
+              ]
+            }
+          }
+        },
+        {
+          "name": "signature",
+          "address": "Sysvar1nstructions1111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "usdc_amount",
+          "type": "u64"
+        },
+        {
+          "name": "destination_domain",
+          "type": "u32"
+        },
+        {
+          "name": "recipient",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "solana_owner",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "fee",
+          "type": "u64"
+        },
+        {
+          "name": "deadline",
+          "type": "u64"
+        },
+        {
+          "name": "gas_drop_amount",
+          "type": "u64"
+        },
+        {
+          "name": "fee_is_native",
+          "type": "bool"
+        }
+      ]
+    },
+    {
+      "name": "transfer_ownership",
+      "discriminator": [
+        65,
+        177,
+        215,
+        73,
+        53,
+        45,
+        99,
+        47
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "owner",
+          "writable": true,
+          "signer": true
+        }
+      ],
+      "args": [
+        {
+          "name": "new_owner",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "transfer_v2",
+      "discriminator": [
+        119,
+        40,
+        6,
+        235,
+        234,
+        221,
+        248,
+        49
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "owner_token_account",
+          "writable": true
+        },
+        {
+          "name": "message_sent_event_data",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "owner",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "fee_collector_sol_account",
+          "writable": true
+        },
+        {
+          "name": "fee_collector_usdc_account",
+          "writable": true
+        },
+        {
+          "name": "gas_drop_collector_sol_account",
+          "writable": true
+        },
+        {
+          "name": "gas_drop_collector_usdc_account",
+          "writable": true
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "custodian",
+          "docs": [
+            "This program's emitter authority.",
+            "",
+            "Seeds must be \\[\"emitter\"\\]."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  109,
+                  105,
+                  116,
+                  116,
+                  101,
+                  114
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "burn_token_mint",
+          "docs": [
+            "Circle-supported mint.",
+            "",
+            "Token Messenger Minter program's local token account."
+          ],
+          "writable": true,
+          "address": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+        },
+        {
+          "name": "burn_token_account",
+          "docs": [
+            "Temporary custody token account. This account will be closed at the end of this instruction.",
+            "It just acts as a conduit to allow this program to be the transfer initiator in the CCTP",
+            "message.",
+            "",
+            "Seeds must be \\[\"__custody\"\\]."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  95,
+                  95,
+                  99,
+                  117,
+                  115,
+                  116,
+                  111,
+                  100,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "denylist_account",
+          "docs": [
+            "Account is denylisted if the account exists at the expected PDA."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  100,
+                  101,
+                  110,
+                  121,
+                  108,
+                  105,
+                  115,
+                  116,
+                  95,
+                  97,
+                  99,
+                  99,
+                  111,
+                  117,
+                  110,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "custodian"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                166,
+                95,
+                200,
+                29,
+                15,
+                239,
+                168,
+                134,
+                12,
+                179,
+                184,
+                63,
+                8,
+                155,
+                2,
+                36,
+                190,
+                138,
+                102,
+                135,
+                183,
+                174,
+                73,
+                245,
+                148,
+                192,
+                185,
+                180,
+                215,
+                233,
+                56,
+                147
+              ]
+            }
+          }
+        },
+        {
+          "name": "local_token",
+          "docs": [
+            "",
+            "Mutable. Seeds must be \\[\"local_token\", mint\\] (CCTP Token Messenger Minter program)."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  111,
+                  99,
+                  97,
+                  108,
+                  95,
+                  116,
+                  111,
+                  107,
+                  101,
+                  110
+                ]
+              },
+              {
+                "kind": "const",
+                "value": [
+                  198,
+                  250,
+                  122,
+                  243,
+                  190,
+                  219,
+                  173,
+                  58,
+                  61,
+                  101,
+                  243,
+                  106,
+                  171,
+                  201,
+                  116,
+                  49,
+                  177,
+                  187,
+                  228,
+                  194,
+                  210,
+                  246,
+                  224,
+                  228,
+                  124,
+                  166,
+                  2,
+                  3,
+                  69,
+                  47,
+                  93,
+                  97
+                ]
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                166,
+                95,
+                200,
+                29,
+                15,
+                239,
+                168,
+                134,
+                12,
+                179,
+                184,
+                63,
+                8,
+                155,
+                2,
+                36,
+                190,
+                138,
+                102,
+                135,
+                183,
+                174,
+                73,
+                245,
+                148,
+                192,
+                185,
+                180,
+                215,
+                233,
+                56,
+                147
+              ]
+            }
+          }
+        },
+        {
+          "name": "token_messenger_minter_program"
+        },
+        {
+          "name": "message_transmitter_program"
+        },
+        {
+          "name": "token_messenger_minter_event_authority",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  95,
+                  95,
+                  101,
+                  118,
+                  101,
+                  110,
+                  116,
+                  95,
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                166,
+                95,
+                200,
+                29,
+                15,
+                239,
+                168,
+                134,
+                12,
+                179,
+                184,
+                63,
+                8,
+                155,
+                2,
+                36,
+                190,
+                138,
+                102,
+                135,
+                183,
+                174,
+                73,
+                245,
+                148,
+                192,
+                185,
+                180,
+                215,
+                233,
+                56,
+                147
+              ]
+            }
+          }
+        },
+        {
+          "name": "message_transmitter",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  101,
+                  115,
+                  115,
+                  97,
+                  103,
+                  101,
+                  95,
+                  116,
+                  114,
+                  97,
+                  110,
+                  115,
+                  109,
+                  105,
+                  116,
+                  116,
+                  101,
+                  114
+                ]
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                166,
+                95,
+                200,
+                28,
+                225,
+                158,
+                220,
+                210,
+                210,
+                195,
+                64,
+                176,
+                47,
+                166,
+                27,
+                225,
+                213,
+                186,
+                221,
+                225,
+                89,
+                40,
+                51,
+                221,
+                249,
+                32,
+                9,
+                216,
+                207,
+                104,
+                84,
+                85
+              ]
+            }
+          }
+        },
+        {
+          "name": "token_messenger",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  111,
+                  107,
+                  101,
+                  110,
+                  95,
+                  109,
+                  101,
+                  115,
+                  115,
+                  101,
+                  110,
+                  103,
+                  101,
+                  114
+                ]
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                166,
+                95,
+                200,
+                29,
+                15,
+                239,
+                168,
+                134,
+                12,
+                179,
+                184,
+                63,
+                8,
+                155,
+                2,
+                36,
+                190,
+                138,
+                102,
+                135,
+                183,
+                174,
+                73,
+                245,
+                148,
+                192,
+                185,
+                180,
+                215,
+                233,
+                56,
+                147
+              ]
+            }
+          }
+        },
+        {
+          "name": "remote_token_messenger",
+          "docs": [
+            "Messenger Minter program)."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  109,
+                  111,
+                  116,
+                  101,
+                  95,
+                  116,
+                  111,
+                  107,
+                  101,
+                  110,
+                  95,
+                  109,
+                  101,
+                  115,
+                  115,
+                  101,
+                  110,
+                  103,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "destination_domain"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                166,
+                95,
+                200,
+                29,
+                15,
+                239,
+                168,
+                134,
+                12,
+                179,
+                184,
+                63,
+                8,
+                155,
+                2,
+                36,
+                190,
+                138,
+                102,
+                135,
+                183,
+                174,
+                73,
+                245,
+                148,
+                192,
+                185,
+                180,
+                215,
+                233,
+                56,
+                147
+              ]
+            }
+          }
+        },
+        {
+          "name": "token_minter",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  111,
+                  107,
+                  101,
+                  110,
+                  95,
+                  109,
+                  105,
+                  110,
+                  116,
+                  101,
+                  114
+                ]
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                166,
+                95,
+                200,
+                29,
+                15,
+                239,
+                168,
+                134,
+                12,
+                179,
+                184,
+                63,
+                8,
+                155,
+                2,
+                36,
+                190,
+                138,
+                102,
+                135,
+                183,
+                174,
+                73,
+                245,
+                148,
+                192,
+                185,
+                180,
+                215,
+                233,
+                56,
+                147
+              ]
+            }
+          }
+        },
+        {
+          "name": "token_messenger_minter_sender_authority",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  101,
+                  110,
+                  100,
+                  101,
+                  114,
+                  95,
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                166,
+                95,
+                200,
+                29,
+                15,
+                239,
+                168,
+                134,
+                12,
+                179,
+                184,
+                63,
+                8,
+                155,
+                2,
+                36,
+                190,
+                138,
+                102,
+                135,
+                183,
+                174,
+                73,
+                245,
+                148,
+                192,
+                185,
+                180,
+                215,
+                233,
+                56,
+                147
+              ]
+            }
+          }
+        },
+        {
+          "name": "signature",
+          "address": "Sysvar1nstructions1111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "usdc_amount",
+          "type": "u64"
+        },
+        {
+          "name": "destination_domain",
+          "type": "u32"
+        },
+        {
+          "name": "recipient",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "solana_owner",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "fee",
+          "type": "u64"
+        },
+        {
+          "name": "deadline",
+          "type": "u64"
+        },
+        {
+          "name": "gas_drop_amount",
+          "type": "u64"
+        },
+        {
+          "name": "fee_is_native",
+          "type": "bool"
+        },
+        {
+          "name": "max_fee",
+          "type": "u64"
+        },
+        {
+          "name": "min_finality_threshold",
+          "type": "u32"
+        }
+      ]
+    }
+  ],
+  "accounts": [
+    {
+      "name": "Config",
+      "discriminator": [
+        155,
+        12,
+        170,
+        224,
+        30,
+        250,
+        204,
+        130
+      ]
+    },
+    {
+      "name": "Custodian",
+      "discriminator": [
+        132,
+        228,
+        139,
+        184,
+        112,
+        228,
+        108,
+        240
+      ]
+    }
+  ],
+  "events": [
+    {
+      "name": "TransferEvent",
+      "discriminator": [
+        100,
+        10,
+        46,
+        113,
+        8,
+        28,
+        179,
+        125
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "NotSigVerified",
+      "msg": "Signature not verified"
+    },
+    {
+      "code": 6001,
+      "name": "InvalidSignatureData",
+      "msg": "Invalid signature data"
+    },
+    {
+      "code": 6002,
+      "name": "InvalidDataFormat",
+      "msg": "Invalid Data format"
+    },
+    {
+      "code": 6003,
+      "name": "LessDataThanExpected",
+      "msg": "Less data than expected"
+    },
+    {
+      "code": 6004,
+      "name": "EpochTooLarge",
+      "msg": "Epoch too large"
+    },
+    {
+      "code": 6005,
+      "name": "InvalidMessageData",
+      "msg": "Invalid message data"
+    },
+    {
+      "code": 6006,
+      "name": "InvalidSignature",
+      "msg": "Invalid signer"
+    }
+  ],
+  "types": [
+    {
+      "name": "Config",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "fee_collector_sol",
+            "type": "pubkey"
+          },
+          {
+            "name": "fee_collector_usdc",
+            "type": "pubkey"
+          },
+          {
+            "name": "gas_drop_collector_sol",
+            "type": "pubkey"
+          },
+          {
+            "name": "gas_drop_collector_usdc",
+            "type": "pubkey"
+          },
+          {
+            "name": "fee_bp",
+            "type": "u64"
+          },
+          {
+            "name": "nonce",
+            "type": "u64"
+          },
+          {
+            "name": "signer_key",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "max_usdc_gas_drop",
+            "type": "u64"
+          },
+          {
+            "name": "max_native_gas_drop",
+            "type": "u64"
+          },
+          {
+            "name": "paused",
+            "type": "bool"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Custodian",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "TransferEvent",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "destination_domain",
+            "type": "u32"
+          },
+          {
+            "name": "nonce",
+            "type": "u64"
+          },
+          {
+            "name": "recipient",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "solana_owner",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "user",
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "gas_drop_amount",
+            "type": "u64"
+          },
+          {
+            "name": "fee_is_native",
+            "type": "bool"
+          },
+          {
+            "name": "cctp_nonce",
+            "type": "i64"
+          },
+          {
+            "name": "cctp_message",
+            "type": "pubkey"
+          }
+        ]
+      }
+    }
+  ]
+}
