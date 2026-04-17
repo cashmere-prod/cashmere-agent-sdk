@@ -11,7 +11,14 @@ export function createAptosSigner(
   privateKey: string,
   rpcUrl?: string,
 ): { account: Account; client: Aptos } {
-  const clean = privateKey.startsWith('0x') ? privateKey.slice(2) : privateKey;
+  let clean = privateKey.startsWith('0x') ? privateKey.slice(2) : privateKey;
+
+  // Aptos CLI generates 64-byte keys (private + public concatenated).
+  // Ed25519PrivateKey expects 32 bytes -- take only the first half if 64 bytes given.
+  if (clean.length === 128) {
+    clean = clean.slice(0, 64);
+  }
+
   const key = new Ed25519PrivateKey(clean);
   const account = Account.fromPrivateKey({ privateKey: key });
 
