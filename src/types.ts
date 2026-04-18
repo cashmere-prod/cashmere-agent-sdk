@@ -75,3 +75,23 @@ export interface BurnFeeResponse {
   finalityThreshold: number;
   minimumFee: number;
 }
+
+export interface SimulateParams {
+  from: Network;
+  to: Network;
+  amount: string;
+  version?: CctpVersion;
+  feeMode?: FeeMode;
+}
+
+export interface SimulateResult {
+  supported: boolean;
+  version: CctpVersion;
+  from: Network;
+  to: Network;
+  estimatedDuration: string;
+  estimatedFee: {
+    cashmere: string;
+    circleBurnBps: number | null;
+  };
+}

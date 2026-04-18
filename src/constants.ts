@@ -132,6 +132,35 @@ export const DEFAULT_RPC_URLS: Record<EvmNetwork, string> = {
 export const SOLANA_DEFAULT_RPC = 'https://api.mainnet-beta.solana.com';
 export const APTOS_DEFAULT_RPC = 'https://api.mainnet.aptoslabs.com/v1';
 
+export const ALL_NETWORKS: Network[] = [
+  'ethereum', 'avalanche', 'polygon', 'arbitrum', 'optimism',
+  'base', 'unichain', 'linea', 'worldchain', 'sei',
+  'sonic', 'hyperevm', 'monad', 'solana', 'aptos', 'sui',
+];
+
+export const DURATION_V2_FAST: Partial<Record<Network, string>> = {
+  ethereum: '~15 seconds', arbitrum: '~15 seconds', base: '~15 seconds',
+  optimism: '~15 seconds', unichain: '~15 seconds', worldchain: '~15 seconds',
+  linea: '~15 seconds', polygon: '~8 seconds', avalanche: '~8 seconds',
+  sonic: '~8 seconds', monad: '~8 seconds', hyperevm: '~5 seconds',
+  sei: '~5 seconds', solana: '~15 seconds',
+};
+
+export const DURATION_V2_NORM: Partial<Record<Network, string>> = {
+  ethereum: '~15 minutes', arbitrum: '~15 minutes', base: '~15 minutes',
+  optimism: '~15 minutes', unichain: '~15 minutes', worldchain: '~15 minutes',
+  linea: '~24 hours', polygon: '~8 seconds', avalanche: '~8 seconds',
+  sonic: '~8 seconds', monad: '~8 seconds', hyperevm: '~5 seconds',
+  sei: '~5 seconds', solana: '~25 seconds',
+};
+
+export const DURATION_V1: Partial<Record<Network, string>> = {
+  ethereum: '~15 minutes', arbitrum: '~15 minutes', base: '~15 minutes',
+  optimism: '~15 minutes', unichain: '~15 minutes', polygon: '~2 minutes',
+  avalanche: '~8 seconds', solana: '~25 seconds', sui: '~8 seconds',
+  aptos: '~8 seconds',
+};
+
 export const EVM_NETWORKS: EvmNetwork[] = [
   'ethereum', 'avalanche', 'polygon', 'arbitrum', 'optimism',
   'base', 'unichain', 'linea', 'worldchain', 'sei',

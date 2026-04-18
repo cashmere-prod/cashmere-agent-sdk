@@ -2,13 +2,18 @@ import type {
   CashmereCCTPConfig,
   TransferParams,
   TransferResult,
+  SimulateParams,
+  SimulateResult,
   Network,
   EvmNetwork,
   FeeMode,
 } from './types';
 import { GasApiClient } from './gas-api';
-import { CCTP_DOMAINS, isEvmNetwork } from './constants';
-import { resolveVersion } from './utils/routing';
+import {
+  CCTP_DOMAINS, isEvmNetwork,
+  DURATION_V1, DURATION_V2_FAST, DURATION_V2_NORM,
+} from './constants';
+import { resolveVersion, getThreshold } from './utils/routing';
 import { toBytes32Hex, getSolanaRecipientAndOwner, ZERO_BYTES32, toByteArray } from './utils/address';
 import { evmTransfer } from './chains/evm';
 import { solanaTransfer } from './chains/solana';
@@ -112,6 +117,64 @@ export class CashmereCCTP {
 
     return { ...partial, version, from, to };
   }
+
+  async simulate(params: SimulateParams): Promise<SimulateResult> {
+    const { from, to, amount } = params;
+
+    if (from === to) {
+      return { supported: false, version: 'v1', from, to, estimatedDuration: 'N/A', estimatedFee: { cashmere: '0', circleBurnBps: null } };
+    }
+
+    let version: import('./types').CctpVersion;
+    try {
+      version = resolveVersion(from, to, params.version);
+    } catch {
+      return { supported: false, version: 'v1', from, to, estimatedDuration: 'N/A', estimatedFee: { cashmere: '0', circleBurnBps: null } };
+    }
+
+    const durationMap = version === 'v2-fast' ? DURATION_V2_FAST
+      : version === 'v2-norm' ? DURATION_V2_NORM
+      : DURATION_V1;
+    const estimatedDuration = durationMap[from] ?? '~15 minutes';
+
+    let cashmereFee = '0';
+    let circleBurnBps: number | null = null;
+    const srcDomain = CCTP_DOMAINS[from];
+    const dstDomain = CCTP_DOMAINS[to];
+    const isNative = (params.feeMode ?? 'native') === 'native';
+    const isV2 = version !== 'v1';
+
+    try {
+      if (isEvmNetwork(from)) {
+        const sig = await this.gasApi.getEcdsaSignature(srcDomain, dstDomain, isV2, isNative);
+        cashmereFee = isNative
+          ? `${sig.fee} wei (native)`
+          : `${Number(sig.fee) / 1e6} USDC`;
+      } else {
+        const sig = await this.gasApi.getEd25519Signature(srcDomain, dstDomain, isNative, isV2 ? 2 : 1);
+        cashmereFee = isNative
+          ? `${sig.fee} (native smallest unit)`
+          : `${Number(sig.fee) / 1e6} USDC`;
+      }
+
+      if (isV2) {
+        const threshold = getThreshold(version);
+        const burnFee = await this.gasApi.getBurnFee(srcDomain, dstDomain, threshold);
+        circleBurnBps = burnFee.minimumFee;
+      }
+    } catch {
+      cashmereFee = 'unable to fetch';
+    }
+
+    return {
+      supported: true,
+      version,
+      from,
+      to,
+      estimatedDuration,
+      estimatedFee: { cashmere: cashmereFee, circleBurnBps },
+    };
+  }
 }
 
 // Re-export types and utilities
@@ -119,6 +182,8 @@ export type {
   CashmereCCTPConfig,
   TransferParams,
   TransferResult,
+  SimulateParams,
+  SimulateResult,
   Network,
   EvmNetwork,
   NonEvmNetwork,
@@ -126,6 +191,7 @@ export type {
   FeeMode,
 } from './types';
 
-export { CCTP_DOMAINS, CASHMERE_CCTP_ADDRESSES, USDC_ADDRESSES, EXPLORER_URLS, isEvmNetwork } from './constants';
+export { CCTP_DOMAINS, CASHMERE_CCTP_ADDRESSES, USDC_ADDRESSES, EXPLORER_URLS, ALL_NETWORKS, isEvmNetwork } from './constants';
 export { isV1Supported, isV2Supported, isV2FastSupported, isV2NormSupported, resolveVersion } from './utils/routing';
 export { GasApiClient } from './gas-api';
+export { bridgeToolSchema, simulateToolSchema } from './tool-schema';

@@ -173,6 +173,65 @@ const gas = new GasApiClient();
 const sig = await gas.getEcdsaSignature(0, 3, true, false);
 ```
 
+## Simulate (Preview Before Execute)
+
+```typescript
+const sim = await cctp.simulate({
+  from: 'ethereum',
+  to: 'arbitrum',
+  amount: '100',
+});
+
+console.log(sim.supported);         // true
+console.log(sim.version);           // 'v2-fast'
+console.log(sim.estimatedDuration); // '~15 seconds'
+console.log(sim.estimatedFee);      // { cashmere: '...', circleBurnBps: 1.3 }
+
+if (sim.supported) {
+  await cctp.transfer({ from: 'ethereum', to: 'arbitrum', amount: '100', recipient: '0x...' });
+}
+```
+
+## Agent Framework Integration
+
+### OpenAI Assistants / Function Calling
+
+```typescript
+import { bridgeToolSchema, simulateToolSchema } from 'cashmere-agent-sdk';
+
+const tools = [
+  { type: "function", function: bridgeToolSchema },
+  { type: "function", function: simulateToolSchema },
+];
+
+// Pass to OpenAI chat completion
+const response = await openai.chat.completions.create({
+  model: "gpt-4",
+  messages: [...],
+  tools,
+});
+```
+
+### LangChain
+
+```typescript
+import { CashmereCCTP } from 'cashmere-agent-sdk';
+import { CashmereBridgeTool, CashmereSimulateTool } from 'cashmere-agent-sdk/tools/langchain';
+
+const cctp = new CashmereCCTP({ evm: { privateKey: process.env.EVM_KEY! } });
+const tools = [
+  new CashmereBridgeTool(cctp),
+  new CashmereSimulateTool(cctp),
+];
+
+// Use with any LangChain agent
+const agent = createReactAgent({ llm, tools });
+```
+
+### crewAI
+
+crewAI uses LangChain tools natively -- same `CashmereBridgeTool` and `CashmereSimulateTool` classes work directly.
+
 ## How It Works
 
 1. SDK builds and signs a source-chain transaction (burn USDC via Cashmere wrapper)
