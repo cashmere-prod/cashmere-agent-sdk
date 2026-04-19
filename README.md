@@ -1,28 +1,28 @@
-# @cashmere-prod/cashmere-agent-sdk
+# @cashmerelabs/cashmere-agent-sdk
 
 TypeScript SDK for Cashmere CCTP cross-chain USDC transfers across EVM, Solana, Aptos, and Sui.
 
 ## Install
 
 ```bash
-npm install @cashmere-prod/cashmere-agent-sdk
+npm install @cashmerelabs/cashmere-agent-sdk
 ```
 
 ## AI Agent / OpenClaw Integration
 
 This SDK ships with a `SKILL.md` file that AI agents (Cursor, Codex, OpenClaw,
 LangChain, etc.) can read to understand Cashmere CCTP capabilities. The skill
-file is included in the npm package at `node_modules/@cashmere-prod/cashmere-agent-sdk/SKILL.md`.
+file is included in the npm package at `node_modules/@cashmerelabs/cashmere-agent-sdk/SKILL.md`.
 
 For OpenClaw-based agents, register the SDK as a tool:
 
 ```typescript
 // OpenClaw tool registration example
-import { CashmereCCTP } from '@cashmere-prod/cashmere-agent-sdk';
+import { CashmereCCTP } from '@cashmerelabs/cashmere-agent-sdk';
 import { readFileSync } from 'fs';
 
 const skillContext = readFileSync(
-  require.resolve('@cashmere-prod/cashmere-agent-sdk/SKILL.md'), 'utf-8'
+  require.resolve('@cashmerelabs/cashmere-agent-sdk/SKILL.md'), 'utf-8'
 );
 
 const cctp = new CashmereCCTP({
@@ -42,7 +42,7 @@ The SKILL.md provides:
 ## Quick Start
 
 ```typescript
-import { CashmereCCTP } from '@cashmere-prod/cashmere-agent-sdk';
+import { CashmereCCTP } from '@cashmerelabs/cashmere-agent-sdk';
 
 const cctp = new CashmereCCTP({
   evm: { privateKey: process.env.EVM_PRIVATE_KEY! },
@@ -158,7 +158,7 @@ import {
   isV2FastSupported,
   resolveVersion,
   GasApiClient,
-} from '@cashmere-prod/cashmere-agent-sdk';
+} from '@cashmerelabs/cashmere-agent-sdk';
 
 // Check route support
 isV1Supported('ethereum', 'arbitrum');     // true
@@ -197,7 +197,7 @@ if (sim.supported) {
 ### OpenAI Assistants / Function Calling
 
 ```typescript
-import { bridgeToolSchema, simulateToolSchema } from '@cashmere-prod/cashmere-agent-sdk';
+import { bridgeToolSchema, simulateToolSchema } from '@cashmerelabs/cashmere-agent-sdk';
 
 const tools = [
   { type: "function", function: bridgeToolSchema },
@@ -215,8 +215,8 @@ const response = await openai.chat.completions.create({
 ### LangChain
 
 ```typescript
-import { CashmereCCTP } from '@cashmere-prod/cashmere-agent-sdk';
-import { CashmereBridgeTool, CashmereSimulateTool } from '@cashmere-prod/cashmere-agent-sdk/tools/langchain';
+import { CashmereCCTP } from '@cashmerelabs/cashmere-agent-sdk';
+import { CashmereBridgeTool, CashmereSimulateTool } from '@cashmerelabs/cashmere-agent-sdk/tools/langchain';
 
 const cctp = new CashmereCCTP({ evm: { privateKey: process.env.EVM_KEY! } });
 const tools = [

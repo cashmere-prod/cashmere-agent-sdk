@@ -1,5 +1,5 @@
 {
-  "name": "@cashmere-prod/cashmere-agent-sdk",
+  "name": "@cashmerelabs/cashmere-agent-sdk",
   "version": "0.1.0",
   "description": "Cashmere CCTP cross-chain USDC transfer SDK for EVM, Solana, Aptos, and Sui",
   "main": "dist/index.js",
