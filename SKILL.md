@@ -16,11 +16,11 @@ All addresses below are public on-chain data. The Gas API URL is
 
 ## SDK Usage (Programmatic)
 
-This skill is bundled with `cashmere-agent-sdk`. If available, prefer calling
+This skill is bundled with `@cashmere-prod/cashmere-agent-sdk`. If available, prefer calling
 the SDK directly instead of building raw transactions:
 
 ```typescript
-import { CashmereCCTP } from 'cashmere-agent-sdk';
+import { CashmereCCTP } from '@cashmere-prod/cashmere-agent-sdk';
 
 const cctp = new CashmereCCTP({
   evm: { privateKey: process.env.EVM_PRIVATE_KEY },
@@ -40,7 +40,7 @@ const result = await cctp.transfer({
 // result.txHash, result.explorerUrl
 ```
 
-Install: `npm install cashmere-agent-sdk`
+Install: `npm install @cashmere-prod/cashmere-agent-sdk`
 
 ---
 
