@@ -113,6 +113,19 @@ export const SUI_USDC_TREASURY = '0x57d6725e7a8b49a7b2a612f6bd66ab5f39fc95332ca4
 export const SUI_USDC_TYPE = '0xdba34672e30cb065b1f93e3ab55318768fd6fef66c15942c9f7cb846e2f900e7::usdc::USDC';
 export const SUI_DENY_LIST = '0x403';
 
+// Sui CCTP V2. Calls go to the upgraded Cashmere package; its types (`transfer::Auth`, `transfer::Config`)
+// keep the original package id above.
+export const SUI_CASHMERE_PACKAGE_V2 = '0x7eab670b3f3e3bb7a0451c7c6b6b627c09e282f0c78eac24966f6479c649d0d5';
+export const SUI_TMM_V2_PACKAGE = '0xeb14978abfe93a37c5d5bf86a0623b923553a5f0e794daac7724f1e2fdbfb830';
+export const SUI_TMM_V2_STATE = '0x06fb166941cd7bc095edc019d054a753ec3f1e4c25f28f2ecc4a6cfa0a9b1167';
+export const SUI_MT_V2_STATE = '0x0c067f7d325e5b60e3179712e7783534ba1556cbb3d359d8161497e37689230c';
+// Circle's USDC handler: burns the coin through the USDC treasury and authorizes `complete_burn`
+export const SUI_USDC_HANDLER_PACKAGE = '0x185ed207c4d64fc594882ab927f9f3c6ff957aad03df8a731ba64378faeeb2bf';
+export const SUI_USDC_HANDLER_STATE = '0xa32de8a6dd0178fb05f662929d55cddb69a25c26bde4b83f89e36d17ead94c41';
+
+// Sui fullnodes no longer serve JSON-RPC; the SDK talks gRPC
+export const SUI_DEFAULT_GRPC = 'https://fullnode.mainnet.sui.io:443';
+
 export const DEFAULT_RPC_URLS: Record<EvmNetwork, string> = {
   ethereum:   'https://ethereum-rpc.publicnode.com',
   arbitrum:   'https://arb1.arbitrum.io/rpc',
@@ -151,7 +164,7 @@ export const DURATION_V2_NORM: Partial<Record<Network, string>> = {
   optimism: '~15 minutes', unichain: '~15 minutes', worldchain: '~15 minutes',
   linea: '~24 hours', polygon: '~8 seconds', avalanche: '~8 seconds',
   sonic: '~8 seconds', monad: '~8 seconds', hyperevm: '~5 seconds',
-  sei: '~5 seconds', solana: '~25 seconds',
+  sei: '~5 seconds', solana: '~25 seconds', sui: '~8 seconds', aptos: '~8 seconds',
 };
 
 export const DURATION_V1: Partial<Record<Network, string>> = {

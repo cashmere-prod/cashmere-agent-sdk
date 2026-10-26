@@ -92,6 +92,10 @@ Aptos <-> Solana, Aptos <-> Sui, Sui <-> Solana.
 **Not supported on:** Linea, Worldchain, Sei, Sonic, HyperEVM, Monad (V2-only
 chains).
 
+**Being retired:** Circle cuts V1 burn limits from 31 Oct 2026 and stops V1
+burns on 1 Dec 2026. Every route has V2, so the SDK no longer picks V1, even
+when `version: 'v1'` is requested.
+
 | Source Chain  | Estimated Duration |
 |---------------|--------------------|
 | Ethereum      | ~15 minutes        |
@@ -109,8 +113,8 @@ chains).
 
 ### V2 Fast (Threshold 1000)
 
-Attestation-free fast finality. Supported on EVM <-> EVM and EVM <-> Solana
-only.
+Attestation-free fast finality. Supported from the fast-finality EVM sources
+below to every destination, Aptos and Sui included.
 
 | Source Chain  | Estimated Duration |
 |---------------|--------------------|
@@ -133,11 +137,13 @@ only.
 `minFinalityThreshold = 1000`.
 
 **Not supported from:** Avalanche, Sei, Sonic, Polygon, Solana, HyperEVM,
-Monad (these only support V2 Norm, not V2 Fast).
+Monad, Aptos, Sui (these only support V2 Norm, not V2 Fast; Circle quotes no
+Fast fee from Aptos or Sui).
 
 ### V2 Norm (Threshold 2000)
 
-Standard finality V2. Supported on all EVM <-> EVM and EVM <-> Solana routes.
+Standard finality V2. Supported on every route, Aptos and Sui included (their
+Cashmere contracts were upgraded for V2 in Oct 2026).
 
 | Source Chain  | Estimated Duration |
 |---------------|--------------------|
@@ -155,6 +161,8 @@ Standard finality V2. Supported on all EVM <-> EVM and EVM <-> Solana routes.
 | HyperEVM      | ~5 seconds         |
 | Sei           | ~5 seconds         |
 | Solana        | ~25 seconds        |
+| Sui           | ~8 seconds         |
+| Aptos         | ~8 seconds         |
 
 **Circle burn fee:** Variable BPS from Circle Iris API (typically lower than
 V2 Fast). `minFinalityThreshold = 2000`.
@@ -222,8 +230,13 @@ Where `minimumFee` comes from Circle Iris API (can be fractional BPS like 1.3).
 | Item                | Address                                                              |
 |---------------------|----------------------------------------------------------------------|
 | Transfer Module     | `0xe49afb1896889e3e1dd7bcbb9e31d1df8221899d3d368e98588ac6b4d84b136d` |
-| Entry Function      | `{module}::transfer::transfer_outer`                                 |
+| Entry Function (V1) | `{module}::transfer::transfer_outer`                                 |
+| Entry Function (V2) | `{module}::transfer::transfer_v2_outer`                              |
 | USDC Coin Type      | `0xbae207659db88bea0cbead6da0ed00aac12edcdda169e591cd41c94180b46f3b` |
+
+`transfer_v2_outer` takes the arguments of `transfer_outer` plus `max_fee: u64`
+and `min_finality_threshold: u32` right before the signature, which the Gas API
+signs with `version=2`. The fee stays the sixth argument.
 
 ### Sui — Move Package
 
@@ -237,6 +250,20 @@ Where `minimumFee` comes from Circle Iris API (can be fractional BPS like 1.3).
 | USDC Treasury                 | `0x57d6725e7a8b49a7b2a612f6bd66ab5f39fc95332ca48be421c3229d514a6de7`     |
 | DenyList                      | `0x403`                                                                  |
 | USDC Type                     | `0xdba34672e30cb065b1f93e3ab55318768fd6fef66c15942c9f7cb846e2f900e7::usdc::USDC` |
+| Cashmere V2 package (calls)   | `0x7eab670b3f3e3bb7a0451c7c6b6b627c09e282f0c78eac24966f6479c649d0d5`     |
+| Circle TokenMessengerMinter V2 | `0xeb14978abfe93a37c5d5bf86a0623b923553a5f0e794daac7724f1e2fdbfb830`    |
+| TokenMessengerMinter V2 State | `0x06fb166941cd7bc095edc019d054a753ec3f1e4c25f28f2ecc4a6cfa0a9b1167`     |
+| Message Transmitter V2 State  | `0x0c067f7d325e5b60e3179712e7783534ba1556cbb3d359d8161497e37689230c`     |
+| Circle USDC Handler           | `0x185ed207c4d64fc594882ab927f9f3c6ff957aad03df8a731ba64378faeeb2bf`     |
+| USDC Handler State            | `0xa32de8a6dd0178fb05f662929d55cddb69a25c26bde4b83f89e36d17ead94c41`     |
+
+V1 runs `prepare_deposit_for_burn_ticket` → Circle `deposit_for_burn_with_package_auth`
+→ `post_deposit_for_burn`. V2 runs, in one transaction, `prepare_deposit_for_burn_v2`
+on the V2 package (USDC only, `max_fee: u256`, `min_finality_threshold: u32` before
+the signature) → TokenMessengerMinter V2 `deposit_for_burn_with_package_auth<USDC, Auth>`
+→ USDC Handler `burn` → `complete_burn<USDC, handler::Auth>`. Types such as
+`transfer::Auth` keep the original package id `0xdf37…`. The SDK reaches Sui over
+gRPC; fullnodes no longer serve JSON-RPC.
 
 ### USDC Addresses (per chain)
 
