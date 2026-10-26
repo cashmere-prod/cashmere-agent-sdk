@@ -44,8 +44,8 @@ const DUPLICATE_WINDOW_MS = 10 * 60 * 1000;
 // src/mcp and dist/mcp both sit two levels below package.json
 const { version } = JSON.parse(readFileSync(join(__dirname, '..', '..', 'package.json'), 'utf8')) as { version: string };
 
-const INSTRUCTIONS = 'Cashmere moves USDC between 16 chains (Ethereum, Base, Arbitrum, Optimism, Polygon, Avalanche, '
-  + 'Unichain, Linea, Worldchain, Sei, Sonic, HyperEVM, Monad, Solana, Aptos, Sui) over Circle CCTP: cross-chain '
+const INSTRUCTIONS = 'Cashmere moves USDC between 17 chains (Ethereum, Base, Arbitrum, Optimism, Polygon, Avalanche, '
+  + 'Unichain, Linea, Worldchain, Sei, Sonic, HyperEVM, Monad, Arc, Solana, Aptos, Sui) over Circle CCTP: cross-chain '
   + 'USDC payments, transfers and treasury moves. cashmere_supported_routes lists routes, CCTP versions and durations, '
   + 'and cashmere_simulate quotes the fee and duration of a transfer; both are read-only.';
 

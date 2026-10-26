@@ -61,7 +61,7 @@ test('with a signer the server lists simulate, routes and a confirm-first bridge
   assert.equal(bridge._meta?.['anthropic/requiresUserInteraction'], true);
   assert.match(bridge.description!, /tell the user the amount, the source and destination chains and the recipient/);
   assert.match(bridge.description!, /only once the user has confirmed/);
-  assert.match(bridge.description!, /send from: ethereum, .*monad, sui\. /);
+  assert.match(bridge.description!, /send from: ethereum, .*monad, arc, sui\. /);
   assert.deepEqual([...bridge.inputSchema.required!].sort(), ['amount', 'from', 'recipient', 'to']);
   assert.match(client.getInstructions()!, /call it only after the user confirms/);
   await client.close();
@@ -200,6 +200,13 @@ test('cashmere_supported_routes follows the routing rules', async () => {
     defaultVersion: 'v2-norm',
     estimatedDuration: { 'v2-norm': '~8 seconds' },
   }]);
+  assert.deepEqual(await routes({ from: 'arc' }), [{
+    from: 'arc',
+    destinations: ALL_NETWORKS.filter(n => n !== 'arc'),
+    versions: ['v2-norm'],
+    defaultVersion: 'v2-norm',
+    estimatedDuration: { 'v2-norm': '~1 second' },
+  }]);
   assert.deepEqual(await routes({ from: 'base', to: 'sui' }), [{
     from: 'base',
     destinations: ['sui'],
@@ -238,7 +245,7 @@ test('the stdio server starts from the bin without keys, bridge off', async () =
 
 test('cashmere_simulate quotes live fees from the gas API', { skip: !process.env.CASHMERE_LIVE && 'set CASHMERE_LIVE=1' }, async () => {
   const client = await spawn({ CASHMERE_MCP_READ_ONLY: '1' });
-  for (const [from, to, version] of [['base', 'arbitrum', 'v2-fast'], ['aptos', 'base', 'v2-norm'], ['solana', 'sui', 'v2-norm']]) {
+  for (const [from, to, version] of [['base', 'arbitrum', 'v2-fast'], ['aptos', 'base', 'v2-norm'], ['solana', 'sui', 'v2-norm'], ['arc', 'base', 'v2-norm']]) {
     const result = await client.callTool({ name: 'cashmere_simulate', arguments: { from, to, amount: '10' } });
     assert.notEqual(result.isError, true, `${from} -> ${to}`);
     const sim = json(result);

@@ -83,6 +83,7 @@ User/Agent ──► Gas API (fee quote + signature)
 | 15     | Monad         | MON    |                                |
 | 16     | Sei           | SEI    |                                |
 | 19     | HyperEVM      | HYPE   | Same domain as Hyperliquid Core|
+| 26     | Arc           | USDC   | Gas token is USDC (18 decimals)|
 
 ---
 
@@ -94,8 +95,8 @@ Requires Circle attestation before destination mint. Supported on
 EVM <-> EVM (older chains), EVM <-> Solana, EVM <-> Aptos, EVM <-> Sui,
 Aptos <-> Solana, Aptos <-> Sui, Sui <-> Solana.
 
-**Not supported on:** Linea, Worldchain, Sei, Sonic, HyperEVM, Monad (V2-only
-chains).
+**Not supported on:** Linea, Worldchain, Sei, Sonic, HyperEVM, Monad, Arc
+(V2-only chains).
 
 **Being retired:** Circle cuts V1 burn limits from 31 Oct 2026 and stops V1
 burns on 1 Dec 2026. Every route has V2, so the SDK no longer picks V1, even
@@ -135,8 +136,8 @@ below to every destination, Aptos and Sui included.
 `minFinalityThreshold = 1000`.
 
 **Not supported from:** Avalanche, Sei, Sonic, Polygon, Solana, HyperEVM,
-Monad, Aptos, Sui (these only support V2 Norm, not V2 Fast; Circle quotes no
-Fast fee from Aptos or Sui).
+Monad, Arc, Aptos, Sui (these only support V2 Norm, not V2 Fast; Circle quotes
+no Fast fee from Arc, Aptos or Sui).
 
 ### V2 Norm (Threshold 2000)
 
@@ -158,6 +159,7 @@ Cashmere contracts were upgraded for V2 in Oct 2026).
 | Monad         | ~8 seconds         |
 | HyperEVM      | ~5 seconds         |
 | Sei           | ~5 seconds         |
+| Arc           | ~1 second          |
 | Solana        | ~25 seconds        |
 | Sui           | ~8 seconds         |
 | Aptos         | ~8 seconds         |
@@ -174,6 +176,7 @@ total_fee = (amount * fee_bp / 10000) + static_fee
 - `fee_bp`: On-chain basis points, max 100 (1%).
 - `static_fee`: From the Gas API quote.
   - **Native mode** (`isNative=true`): static fee paid in native token (ETH/SOL/APT/SUI/etc.), USDC formula uses `static_fee=0`.
+    On Arc the native token is USDC with 18 decimals, so the Gas API's native fee (`190000000000000000`) is 0.19 USDC.
   - **Stable mode** (`isNative=false`): static fee added to USDC deduction.
 - **Gas drop:** Currently disabled. Pass `gasDropAmount=0` in all transfers.
 
@@ -205,6 +208,7 @@ Where `minimumFee` comes from Circle Iris API (can be fractional BPS like 1.3).
 | Sonic      | `0xD156fFB54871F4562744d6Be5d6321B5BffCa3B6` |
 | HyperEVM   | `0x15b2810232ec96ff083ca6d8b785cb930d241d83` |
 | Monad      | `0xD156fFB54871F4562744d6Be5d6321B5BffCa3B6` |
+| Arc        | `0xD156fFB54871F4562744d6Be5d6321B5BffCa3B6` |
 
 ### Solana — Anchor Program
 
@@ -280,9 +284,13 @@ gRPC; fullnodes no longer serve JSON-RPC.
 | Sonic      | `0x29219dd400f2Bf60E5a23d13Be72B486D4038894`      |
 | HyperEVM   | `0xb88339CB7199b77E23DB6E890353E22632Ba630f`      |
 | Monad      | `0x754704Bc059F8C67012fEd69BC8A327a5aafb603`      |
+| Arc        | `0x3600000000000000000000000000000000000000`      |
 | Solana     | `EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`   |
 | Aptos      | `0xbae207659db88bea0cbead6da0ed00aac12edcdda169e591cd41c94180b46f3b` |
 | Sui        | `0xdba34672e30cb065b1f93e3ab55318768fd6fef66c15942c9f7cb846e2f900e7::usdc::USDC` |
+
+On Arc, USDC is also the gas token: the native balance (18 decimals) and the ERC-20 above (6 decimals) are the same
+funds. CCTP burns through the ERC-20, so amounts stay in 6 decimals; only `msg.value` uses 18.
 
 ---
 
@@ -851,6 +859,7 @@ every route over V2. Without a `version`, it picks V2 Fast where the source has 
 | Sonic      | N       | Y       | v2-norm   | ~8 seconds          | N           |
 | HyperEVM   | N       | Y       | v2-norm   | ~5 seconds          | N           |
 | Monad      | N       | Y       | v2-norm   | ~8 seconds          | N           |
+| Arc        | N       | Y       | v2-norm   | ~1 second           | N           |
 | Solana     | N       | Y       | v2-norm   | ~25 seconds         | Y           |
 | Aptos      | N       | Y       | v2-norm   | ~8 seconds          | Y           |
 | Sui        | N       | Y       | v2-norm   | ~8 seconds          | Y           |
@@ -866,7 +875,8 @@ Only these chains can send V2 Fast (threshold 1000): `ethereum`, `arbitrum`, `op
 ### V1 (legacy)
 
 The contracts still accept V1 between `ethereum`, `avalanche`, `polygon`, `arbitrum`, `optimism`, `base`, `unichain`,
-`solana`, `aptos` and `sui`. These chains never had V1: `linea`, `worldchain`, `sei`, `sonic`, `hyperevm`, `monad`.
+`solana`, `aptos` and `sui`. These chains never had V1: `linea`, `worldchain`, `sei`, `sonic`, `hyperevm`, `monad`,
+`arc`.
 
 ---
 

@@ -15,6 +15,7 @@
 | `sonic` | Sonic | EVM | S (10^18) | https://sonicscan.org |
 | `hyperevm` | HyperEVM | EVM | HYPE (10^18) | https://hyperevmscan.io |
 | `monad` | Monad | EVM | MON (10^18) | https://monadvision.com |
+| `arc` | Arc | EVM | USDC (10^18; the USDC token itself has 6 decimals) | https://explorer.arc.io |
 | `solana` | Solana | Solana | SOL (lamports, 10^9) | https://solscan.io |
 | `aptos` | Aptos | Move | APT (octas, 10^8) | https://aptoscan.com |
 | `sui` | Sui | Move | SUI (MIST, 10^9) | https://suiscan.xyz |

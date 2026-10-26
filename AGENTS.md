@@ -6,7 +6,7 @@ Instructions for coding agents working in this repository. For agents that send 
 ## What this is
 
 `@cashmerelabs/cashmere-agent-sdk` is a TypeScript SDK and MCP server for cross-chain USDC transfers over Circle CCTP,
-through the Cashmere contracts, on 13 EVM chains, Solana, Aptos and Sui. It signs and sends real transactions.
+through the Cashmere contracts, on 14 EVM chains, Solana, Aptos and Sui. It signs and sends real transactions.
 
 ## Layout
 

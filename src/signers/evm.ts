@@ -26,6 +26,11 @@ const KNOWN_CHAINS: Partial<Record<EvmNetwork, Chain>> = {
   linea,
 };
 
+// viem names the gas token in its errors. Arc's is USDC, held natively with 18 decimals.
+const NATIVE_CURRENCIES: Partial<Record<EvmNetwork, Chain['nativeCurrency']>> = {
+  arc: { name: 'USDC', symbol: 'USDC', decimals: 18 },
+};
+
 function buildChain(network: EvmNetwork, rpcUrl: string): Chain {
   const known = KNOWN_CHAINS[network];
   if (known) return known;
@@ -33,7 +38,7 @@ function buildChain(network: EvmNetwork, rpcUrl: string): Chain {
   return {
     id: EVM_CHAIN_IDS[network],
     name: network,
-    nativeCurrency: { name: network, symbol: network.toUpperCase(), decimals: 18 },
+    nativeCurrency: NATIVE_CURRENCIES[network] ?? { name: network, symbol: network.toUpperCase(), decimals: 18 },
     rpcUrls: {
       default: { http: [rpcUrl] },
     },

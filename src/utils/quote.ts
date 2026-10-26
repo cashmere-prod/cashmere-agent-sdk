@@ -13,6 +13,8 @@ export const MAX_NATIVE_FEE: Record<Network, bigint> = {
   monad: 2_000n * E18,          // 2,000 MON
   sei: 1_000n * E18,            // 1,000 SEI
   hyperevm: E18 / 2n,           // 0.5 HYPE
+  // Arc pays the fee in USDC either way, natively with 18 decimals, so the stable cap applies
+  arc: 10n * E18,               // 10 USDC
   solana: 500_000_000n,         // 0.5 SOL, in lamports
   aptos: 6_000_000_000n,        // 60 APT, in octas
   sui: 50_000_000_000n,         // 50 SUI, in MIST
