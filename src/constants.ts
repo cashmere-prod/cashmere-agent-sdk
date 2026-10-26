@@ -19,6 +19,7 @@ export const CCTP_DOMAINS: Record<Network, number> = {
   monad: 15,
   sei: 16,
   hyperevm: 19,
+  arc: 26,
 };
 
 export const EVM_CHAIN_IDS: Record<EvmNetwork, number> = {
@@ -35,6 +36,7 @@ export const EVM_CHAIN_IDS: Record<EvmNetwork, number> = {
   sonic: 146,
   hyperevm: 999,
   monad: 143,
+  arc: 5042,
 };
 
 export const CASHMERE_CCTP_ADDRESSES: Partial<Record<EvmNetwork, `0x${string}`>> = {
@@ -51,6 +53,7 @@ export const CASHMERE_CCTP_ADDRESSES: Partial<Record<EvmNetwork, `0x${string}`>>
   sonic:      '0xD156fFB54871F4562744d6Be5d6321B5BffCa3B6',
   hyperevm:   '0x15b2810232ec96ff083ca6d8b785cb930d241d83',
   monad:      '0xD156fFB54871F4562744d6Be5d6321B5BffCa3B6',
+  arc:        '0xD156fFB54871F4562744d6Be5d6321B5BffCa3B6',
 };
 
 export const USDC_ADDRESSES: Partial<Record<Network, string>> = {
@@ -67,6 +70,8 @@ export const USDC_ADDRESSES: Partial<Record<Network, string>> = {
   sonic:      '0x29219dd400f2Bf60E5a23d13Be72B486D4038894',
   hyperevm:   '0xb88339CB7199b77E23DB6E890353E22632Ba630f',
   monad:      '0x754704Bc059F8C67012fEd69BC8A327a5aafb603',
+  // Arc's gas token is USDC: this ERC-20 interface to it has 6 decimals, the native balance 18
+  arc:        '0x3600000000000000000000000000000000000000',
   solana:     'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
   aptos:      '0xbae207659db88bea0cbead6da0ed00aac12edcdda169e591cd41c94180b46f3b',
   sui:        '0xdba34672e30cb065b1f93e3ab55318768fd6fef66c15942c9f7cb846e2f900e7::usdc::USDC',
@@ -86,6 +91,7 @@ export const EXPLORER_URLS: Partial<Record<Network, string>> = {
   sonic:      'https://sonicscan.org',
   hyperevm:   'https://hyperevmscan.io',
   monad:      'https://monadvision.com',
+  arc:        'https://explorer.arc.io',
   solana:     'https://solscan.io',
   aptos:      'https://aptoscan.com',
   sui:        'https://suiscan.xyz',
@@ -140,6 +146,7 @@ export const DEFAULT_RPC_URLS: Record<EvmNetwork, string> = {
   sonic:      'https://sonic.api.pocket.network',
   hyperevm:   'https://rpc.hyperliquid.xyz/evm',
   monad:      'https://rpc3.monad.xyz',
+  arc:        'https://rpc.mainnet.arc.io',
 };
 
 export const SOLANA_DEFAULT_RPC = 'https://api.mainnet-beta.solana.com';
@@ -148,7 +155,7 @@ export const APTOS_DEFAULT_RPC = 'https://api.mainnet.aptoslabs.com/v1';
 export const ALL_NETWORKS: Network[] = [
   'ethereum', 'avalanche', 'polygon', 'arbitrum', 'optimism',
   'base', 'unichain', 'linea', 'worldchain', 'sei',
-  'sonic', 'hyperevm', 'monad', 'solana', 'aptos', 'sui',
+  'sonic', 'hyperevm', 'monad', 'arc', 'solana', 'aptos', 'sui',
 ];
 
 export const DURATION_V2_FAST: Partial<Record<Network, string>> = {
@@ -164,7 +171,7 @@ export const DURATION_V2_NORM: Partial<Record<Network, string>> = {
   optimism: '~15 minutes', unichain: '~15 minutes', worldchain: '~15 minutes',
   linea: '~24 hours', polygon: '~8 seconds', avalanche: '~8 seconds',
   sonic: '~8 seconds', monad: '~8 seconds', hyperevm: '~5 seconds',
-  sei: '~5 seconds', solana: '~25 seconds', sui: '~8 seconds', aptos: '~8 seconds',
+  sei: '~5 seconds', arc: '~1 second', solana: '~25 seconds', sui: '~8 seconds', aptos: '~8 seconds',
 };
 
 export const DURATION_V1: Partial<Record<Network, string>> = {
@@ -177,7 +184,7 @@ export const DURATION_V1: Partial<Record<Network, string>> = {
 export const EVM_NETWORKS: EvmNetwork[] = [
   'ethereum', 'avalanche', 'polygon', 'arbitrum', 'optimism',
   'base', 'unichain', 'linea', 'worldchain', 'sei',
-  'sonic', 'hyperevm', 'monad',
+  'sonic', 'hyperevm', 'monad', 'arc',
 ];
 
 export function isEvmNetwork(network: Network): network is EvmNetwork {

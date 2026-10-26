@@ -1,6 +1,6 @@
 ---
 name: cashmere-usdc-transfers
-description: Send, pay or move USDC across chains with Cashmere CCTP (Circle CCTP V2) between Ethereum, Base, Arbitrum, Optimism, Polygon, Avalanche, Unichain, Linea, World Chain, Sei, Sonic, HyperEVM, Monad, Solana, Aptos and Sui. Use when the user wants to pay someone in USDC on another chain, transfer or bridge USDC between chains, move stablecoin treasury from one chain to another, or compare cross-chain USDC fees, routes and arrival times. Works through the Cashmere MCP tools cashmere_simulate, cashmere_supported_routes and cashmere_bridge.
+description: Send, pay or move USDC across chains with Cashmere CCTP (Circle CCTP V2) between Ethereum, Base, Arbitrum, Optimism, Polygon, Avalanche, Unichain, Linea, World Chain, Sei, Sonic, HyperEVM, Monad, Arc, Solana, Aptos and Sui. Use when the user wants to pay someone in USDC on another chain, transfer or bridge USDC between chains, move stablecoin treasury from one chain to another, or compare cross-chain USDC fees, routes and arrival times. Works through the Cashmere MCP tools cashmere_simulate, cashmere_supported_routes and cashmere_bridge.
 license: MIT
 compatibility: Needs the Cashmere MCP server (npx -y @cashmerelabs/cashmere-agent-sdk@0.2.0, Node.js 22+) connected to the agent, and network access.
 ---
@@ -32,7 +32,7 @@ first two are listed, the server is read-only or has no key. Tell the user, and 
    - The amount is digits with up to 6 decimals, such as `"250"` or `"0.5"`.
    - Ask for any value that is missing. Never guess the source chain: it is where the user's wallet holds the USDC.
    - Chain ids are `ethereum`, `base`, `arbitrum`, `optimism`, `polygon`, `avalanche`, `unichain`, `linea`,
-     `worldchain`, `sei`, `sonic`, `hyperevm`, `monad`, `solana`, `aptos` and `sui`.
+     `worldchain`, `sei`, `sonic`, `hyperevm`, `monad`, `arc`, `solana`, `aptos` and `sui`.
    - Source and destination must differ. A payment on one chain is a plain USDC transfer, which these tools don't do.
 2. **Check the recipient** against the destination chain's format in [references/chains.md](references/chains.md).
    - Copy it exactly. Never shorten, complete or "correct" an address.
@@ -84,10 +84,13 @@ first two are listed, the server is read-only or has no key. Tell the user, and 
   (1.3 bps is 0.013%). V2 Norm usually has none (`circleBurnBps: 0`).
 - So the recipient receives slightly less than the amount sent. When an invoice must arrive in full, say so and
   offer to add a small margin.
-- The wallet also needs the source chain's gas token to pay for gas, and for the fee in native mode.
+- The wallet also needs the source chain's gas token to pay for gas, and for the fee in native mode. On Arc the gas
+  token is USDC itself: the one USDC balance pays the amount, the gas and the fee, so it must hold the amount plus the
+  quoted fee plus a little for gas.
 - A native `cashmere` fee such as `"343617201738094 wei (native)"` is in the smallest unit of the source chain's gas
-  token: divide by 10^18 on EVM chains, 10^9 for SOL and SUI, 10^8 for APT. `"unable to fetch"` means the quote
-  failed: simulate again before sending.
+  token: divide by 10^18 on EVM chains, 10^9 for SOL and SUI, 10^8 for APT. From Arc that gives USDC:
+  `"190000000000000000 wei (native)"` is 0.19 USDC. `"unable to fetch"` means the quote failed: simulate again before
+  sending.
 
 ## Speed or cost
 

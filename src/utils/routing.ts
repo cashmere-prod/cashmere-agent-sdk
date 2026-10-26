@@ -2,12 +2,12 @@ import type { Network, CctpVersion } from '../types';
 import { isEvmNetwork } from '../constants';
 
 const V1_UNSUPPORTED: Network[] = [
-  'linea', 'worldchain', 'sei', 'sonic', 'hyperevm', 'monad',
+  'linea', 'worldchain', 'sei', 'sonic', 'hyperevm', 'monad', 'arc',
 ];
 
-// Circle quotes no Fast fee from Aptos or Sui, so transfers from them use V2 Norm
+// Circle quotes no Fast fee from Arc, Aptos or Sui, so transfers from them use V2 Norm
 const V2_FAST_UNSUPPORTED_SOURCES: Network[] = [
-  'avalanche', 'sei', 'sonic', 'polygon', 'solana', 'hyperevm', 'monad', 'aptos', 'sui',
+  'avalanche', 'sei', 'sonic', 'polygon', 'solana', 'hyperevm', 'monad', 'arc', 'aptos', 'sui',
 ];
 
 export function isV1Supported(from: Network, to: Network): boolean {

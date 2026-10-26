@@ -12,6 +12,7 @@ const MOVE = `0x${'5a'.repeat(32)}`;
 test('recipients in the destination chain format pass', () => {
   assert.equal(recipientError('base', EVM), undefined);
   assert.equal(recipientError('arbitrum', EVM.toLowerCase()), undefined);
+  assert.equal(recipientError('arc', EVM), undefined);
   assert.equal(recipientError('solana', SOLANA_WALLET), undefined);
   assert.equal(recipientError('aptos', MOVE), undefined);
   assert.equal(recipientError('sui', MOVE), undefined);
@@ -35,6 +36,7 @@ test('mistyped or non-wallet recipients are refused', () => {
   assert.match(recipientError('base', `0x${'0'.repeat(40)}`)!, /zero address/);
   assert.match(recipientError('base', USDC_ADDRESSES.base!)!, /USDC token/);
   assert.match(recipientError('solana', USDC_ADDRESSES.solana!)!, /USDC token/);
+  assert.match(recipientError('arc', USDC_ADDRESSES.arc!)!, /USDC token/);
   // the wallet's own USDC token account, which the SDK would wrap in another token account
   const ata = getSolanaRecipientAndOwner(SOLANA_WALLET).recipient;
   const ataBase58 = new PublicKey(Buffer.from(ata.slice(2), 'hex')).toBase58();

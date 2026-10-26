@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { ALL_NETWORKS } from '../constants';
 import type { Network } from '../types';
-import { getThreshold, isV2FastSupported, isV2Supported, resolveVersion } from './routing';
+import { getThreshold, isV1Supported, isV2FastSupported, isV2Supported, resolveVersion } from './routing';
 
 const MOVE: Network[] = ['aptos', 'sui'];
 
@@ -34,6 +34,20 @@ test('transfers to Aptos and Sui use V2 Fast where the source has it, V2 Norm ot
   assert.equal(resolveVersion('base', 'sui', 'v2-norm'), 'v2-norm');
   assert.equal(resolveVersion('avalanche', 'aptos'), 'v2-norm');
   assert.equal(resolveVersion('solana', 'sui'), 'v2-norm');
+});
+
+test('Arc is V2 only, and transfers from it use V2 Norm: Circle quotes no Fast fee from Arc', () => {
+  for (const other of ALL_NETWORKS.filter(n => n !== 'arc')) {
+    assert.equal(isV1Supported('arc', other), false, `arc -> ${other}`);
+    assert.equal(isV1Supported(other, 'arc'), false, `${other} -> arc`);
+    assert.equal(resolveVersion('arc', other), 'v2-norm', `arc -> ${other}`);
+    assert.equal(resolveVersion('arc', other, 'v2-fast'), 'v2-norm', `arc -> ${other} asked for v2-fast`);
+  }
+  // Burns on Arc carry minFinalityThreshold 2000
+  assert.equal(getThreshold(resolveVersion('arc', 'base')), 2000);
+  // Into Arc, V2 Fast where the source has it
+  assert.equal(resolveVersion('base', 'arc'), 'v2-fast');
+  assert.equal(resolveVersion('avalanche', 'arc'), 'v2-norm');
 });
 
 test('V1 is not picked on a route that has V2, even when asked for', () => {

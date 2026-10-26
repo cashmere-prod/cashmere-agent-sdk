@@ -1,7 +1,7 @@
 export type EvmNetwork =
   | 'ethereum' | 'avalanche' | 'polygon' | 'arbitrum' | 'optimism'
   | 'base' | 'unichain' | 'linea' | 'worldchain' | 'sei'
-  | 'sonic' | 'hyperevm' | 'monad';
+  | 'sonic' | 'hyperevm' | 'monad' | 'arc';
 
 export type NonEvmNetwork = 'solana' | 'aptos' | 'sui';
 

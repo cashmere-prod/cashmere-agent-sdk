@@ -157,12 +157,13 @@ await cctp.transfer({
 | Sonic           | N  | N       | Y       | All EVM, Solana, Aptos, Sui     |
 | HyperEVM        | N  | N       | Y       | All EVM, Solana, Aptos, Sui     |
 | Monad           | N  | N       | Y       | All EVM, Solana, Aptos, Sui     |
+| Arc             | N  | N       | Y       | All EVM, Solana, Aptos, Sui     |
 | Solana          | Y  | N       | Y       | All EVM, Aptos, Sui             |
 | Aptos           | Y  | N       | Y       | All EVM, Solana, Sui            |
 | Sui             | Y  | N       | Y       | All EVM, Solana, Aptos          |
 
-V1 shows what the contracts still accept; the SDK sends every route over V2. Circle quotes no Fast fee from Aptos or
-Sui, so transfers from them go V2 Norm; transfers to them go V2 Fast where the source has it.
+V1 shows what the contracts still accept; the SDK sends every route over V2. Circle quotes no Fast fee from Arc, Aptos
+or Sui, so transfers from them go V2 Norm; transfers to them go V2 Fast where the source has it.
 
 ## Utilities
 
@@ -212,6 +213,9 @@ if (sim.supported) {
 smallest native unit (wei on EVM chains, lamports, octas, MIST); with `'stable'` it reads like `'0.19 USDC'` and comes out
 of the amount. On top of it, Cashmere takes an on-chain percentage of the amount (at most 1%, not in the quote), and on
 V2 Fast Circle keeps up to `circleBurnBps` basis points when it mints. So the recipient gets slightly less than `amount`.
+
+Arc's gas token is USDC itself, with 18 decimals: a native fee from Arc of `'190000000000000000 wei (native)'` is
+0.19 USDC, and the one USDC balance there pays the amount, the fee and the gas.
 
 ## MCP Server
 
