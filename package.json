@@ -1,9 +1,29 @@
 {
   "name": "@cashmerelabs/cashmere-agent-sdk",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Cashmere CCTP cross-chain USDC transfer SDK for EVM, Solana, Aptos, and Sui",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./tools/langchain": {
+      "types": "./dist/tools/langchain.d.ts",
+      "default": "./dist/tools/langchain.js"
+    },
+    "./SKILL.md": "./SKILL.md",
+    "./skills/*": "./skills/*",
+    "./dist/*.js": "./dist/*.js",
+    "./dist/*": "./dist/*.js",
+    "./package.json": "./package.json"
+  },
+  "typesVersions": {
+    "*": {
+      "tools/langchain": ["dist/tools/langchain.d.ts"]
+    }
+  },
   "bin": {
     "cashmere-mcp": "dist/mcp/cli.js"
   },
@@ -12,7 +32,7 @@
     "build": "tsc",
     "clean": "rm -rf dist",
     "prepublishOnly": "npm run clean && npm run build",
-    "test": "tsx --test src/utils/routing.test.ts src/chains/aptos.test.ts src/chains/sui.test.ts src/utils/address.test.ts src/tools/hermes.test.ts src/mcp/server.test.ts"
+    "test": "tsx --test src/utils/routing.test.ts src/chains/aptos.test.ts src/chains/sui.test.ts src/signers/sui.test.ts src/utils/address.test.ts src/utils/quote.test.ts src/gas-api.test.ts src/signers/solana.test.ts src/tools/hermes.test.ts src/mcp/server.test.ts"
   },
   "dependencies": {
     "viem": "^2.21.0",
@@ -39,7 +59,7 @@
     "tsx": "^4.20.6"
   },
   "engines": {
-    "node": ">=20.19"
+    "node": ">=22"
   },
   "license": "MIT"
 }

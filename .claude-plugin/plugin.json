@@ -9,18 +9,31 @@
   "homepage": "https://github.com/cashmere-prod/cashmere-agent-sdk",
   "repository": "https://github.com/cashmere-prod/cashmere-agent-sdk",
   "license": "MIT",
-  "keywords": ["usdc", "stablecoin", "payments", "cctp", "cross-chain", "bridge"],
+  "keywords": [
+    "usdc",
+    "stablecoin",
+    "payments",
+    "cctp",
+    "cross-chain",
+    "bridge"
+  ],
   "mcpServers": {
     "cashmere": {
       "command": "npx",
-      "args": ["-y", "@cashmerelabs/cashmere-agent-sdk"],
+      "args": [
+        "-y",
+        "@cashmerelabs/cashmere-agent-sdk@0.2.0"
+      ],
       "env": {
-        "EVM_PRIVATE_KEY": "${user_config.evm_private_key}",
-        "SOLANA_PRIVATE_KEY": "${user_config.solana_private_key}",
-        "APTOS_PRIVATE_KEY": "${user_config.aptos_private_key}",
-        "SUI_PRIVATE_KEY": "${user_config.sui_private_key}",
+        "CASHMERE_EVM_PRIVATE_KEY": "${user_config.evm_private_key}",
+        "CASHMERE_SOLANA_PRIVATE_KEY": "${user_config.solana_private_key}",
+        "CASHMERE_APTOS_PRIVATE_KEY": "${user_config.aptos_private_key}",
+        "CASHMERE_SUI_PRIVATE_KEY": "${user_config.sui_private_key}",
         "CASHMERE_MCP_READ_ONLY": "${user_config.read_only}",
-        "CASHMERE_MCP_MAX_AMOUNT": "${user_config.max_amount}"
+        "CASHMERE_MCP_MAX_AMOUNT": "${user_config.max_amount}",
+        "CASHMERE_MCP_MAX_TOTAL": "${user_config.max_total}",
+        "CASHMERE_MCP_ALLOWED_RECIPIENTS": "${user_config.allowed_recipients}",
+        "npm_config_ignore_scripts": "true"
       }
     }
   },
@@ -36,28 +49,38 @@
       "title": "Largest transfer (USDC)",
       "description": "cashmere_bridge refuses transfers above this amount, such as 500. Leave empty for no limit"
     },
+    "max_total": {
+      "type": "string",
+      "title": "Largest total (USDC)",
+      "description": "cashmere_bridge stops once it has sent this much in one session, such as 2000. Leave empty for no limit"
+    },
+    "allowed_recipients": {
+      "type": "string",
+      "title": "Allowed recipients",
+      "description": "Comma-separated addresses cashmere_bridge may send to. Leave empty to allow any recipient"
+    },
     "evm_private_key": {
       "type": "string",
       "title": "EVM private key",
-      "description": "Hex key of the wallet that sends from EVM chains. Leave empty to skip",
+      "description": "Hex key of the wallet that sends from EVM chains, as MetaMask exports it. Leave empty to skip",
       "sensitive": true
     },
     "solana_private_key": {
       "type": "string",
       "title": "Solana private key",
-      "description": "Base58, hex or JSON-array key of the wallet that sends from Solana. Leave empty to skip",
+      "description": "Base58 key (Phantom, Solflare), JSON array or hex of the wallet that sends from Solana. Leave empty to skip",
       "sensitive": true
     },
     "aptos_private_key": {
       "type": "string",
       "title": "Aptos private key",
-      "description": "Hex key of the wallet that sends from Aptos. Leave empty to skip",
+      "description": "Hex or ed25519-priv-0x... key (Petra) of the wallet that sends from Aptos. Leave empty to skip",
       "sensitive": true
     },
     "sui_private_key": {
       "type": "string",
       "title": "Sui private key",
-      "description": "Hex key of the wallet that sends from Sui. Leave empty to skip",
+      "description": "suiprivkey1... key (Slush, Sui Wallet) or hex of the wallet that sends from Sui. Leave empty to skip",
       "sensitive": true
     }
   }

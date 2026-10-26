@@ -1,10 +1,11 @@
 import { Tool } from '@langchain/core/tools';
 import type { CashmereCCTP } from '../index';
+import { bridgeToolSchema } from '../tool-schema';
 
 export class CashmereBridgeTool extends Tool {
   name = 'cashmere_bridge';
   description =
-    'Bridge USDC across chains via Cashmere CCTP. Input is JSON: {"from":"ethereum","to":"arbitrum","amount":"100","recipient":"0x...","version":"v2-fast","feeMode":"native"}. Supports 16 chains: EVM (Ethereum, Arbitrum, Base, Optimism, Polygon, Avalanche, Linea, Worldchain, Sei, Sonic, HyperEVM, Monad, Unichain), Solana, Aptos, Sui. Destination mint is automatic.';
+    `${bridgeToolSchema.description} Input is JSON: {"from":"ethereum","to":"arbitrum","amount":"100","recipient":"0x...","version":"v2-fast","feeMode":"native"}.`;
 
   private cctp: CashmereCCTP;
 

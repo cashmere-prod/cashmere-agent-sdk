@@ -8,8 +8,9 @@ import { ALL_NETWORKS } from '../constants';
 import type { TransferParams, TransferResult } from '../types';
 import { createCashmereMcpServer, redact, serverOptionsFromEnv, type CashmereMcpServerOptions } from './server';
 
-// A throwaway key so the bridge tool registers: no test calls cashmere_bridge
+// A throwaway key so the bridge tool registers: cashmere_bridge only ever runs against a stub
 const KEY = `0x${'ab'.repeat(32)}`;
+const SUI_RECIPIENT = `0x${'5a'.repeat(32)}`;
 
 async function connect(options: CashmereMcpServerOptions): Promise<Client> {
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
@@ -60,7 +61,7 @@ test('with a signer the server lists simulate, routes and a confirm-first bridge
   assert.equal(bridge._meta?.['anthropic/requiresUserInteraction'], true);
   assert.match(bridge.description!, /tell the user the amount, the source and destination chains and the recipient/);
   assert.match(bridge.description!, /only once the user has confirmed/);
-  assert.match(bridge.description!, /send from: ethereum, .*monad, sui\.$/);
+  assert.match(bridge.description!, /send from: ethereum, .*monad, sui\. /);
   assert.deepEqual([...bridge.inputSchema.required!].sort(), ['amount', 'from', 'recipient', 'to']);
   assert.match(client.getInstructions()!, /call it only after the user confirms/);
   await client.close();
@@ -75,24 +76,26 @@ test('read-only mode, or no key at all, leaves cashmere_bridge out', async () =>
   }
 });
 
-test('keys come from the environment, and CASHMERE_MCP_READ_ONLY keeps them unread', () => {
-  assert.deepEqual(serverOptionsFromEnv({}), { config: { gasApiUrl: undefined }, readOnly: false, maxAmount: undefined });
+test('keys come from the CASHMERE_ environment variables, and CASHMERE_MCP_READ_ONLY keeps them unread', () => {
+  assert.deepEqual(serverOptionsFromEnv({}), { config: { gasApiUrl: undefined }, readOnly: false, maxAmount: undefined, maxTotal: undefined, allowedRecipients: undefined });
 
   const { config } = serverOptionsFromEnv({
-    EVM_PRIVATE_KEY: ` ${KEY} `,
-    EVM_RPC_URL: 'https://rpc.example',
-    SOLANA_PRIVATE_KEY: '',
+    CASHMERE_EVM_PRIVATE_KEY: ` ${KEY} `,
+    CASHMERE_EVM_RPC_URL: 'https://rpc.example',
+    CASHMERE_SOLANA_PRIVATE_KEY: '',
     // what a client passes when its config had nothing to substitute
-    SUI_PRIVATE_KEY: '${user_config.sui_private_key}',
-    GAS_API_URL: 'https://gas.example',
+    CASHMERE_SUI_PRIVATE_KEY: '${user_config.sui_private_key}',
+    CASHMERE_GAS_API_URL: 'https://gas.example',
   });
   assert.deepEqual(config, { gasApiUrl: 'https://gas.example', evm: { privateKey: KEY, rpcUrl: 'https://rpc.example' } });
 
+  // Claude Code passes the shell environment along: a key exported there for other tools is not a wallet for the agent
+  assert.deepEqual(serverOptionsFromEnv({ EVM_PRIVATE_KEY: KEY, SOLANA_PRIVATE_KEY: KEY, GAS_API_URL: 'http://gas.example' }), { config: { gasApiUrl: undefined }, readOnly: false, maxAmount: undefined, maxTotal: undefined, allowedRecipients: undefined });
+
   for (const flag of ['1', 'true', 'YES', 'on']) {
-    assert.deepEqual(serverOptionsFromEnv({ EVM_PRIVATE_KEY: KEY, CASHMERE_MCP_READ_ONLY: flag }), {
-      config: { gasApiUrl: undefined },
+    assert.deepEqual(serverOptionsFromEnv({ CASHMERE_EVM_PRIVATE_KEY: KEY, CASHMERE_MCP_READ_ONLY: flag }), {
+      ...{ config: { gasApiUrl: undefined }, readOnly: false, maxAmount: undefined, maxTotal: undefined, allowedRecipients: undefined },
       readOnly: true,
-      maxAmount: undefined,
     }, flag);
   }
   for (const flag of ['0', 'false', 'off', '']) {
@@ -100,9 +103,22 @@ test('keys come from the environment, and CASHMERE_MCP_READ_ONLY keeps them unre
   }
 
   assert.equal(serverOptionsFromEnv({ CASHMERE_MCP_MAX_AMOUNT: ' 250.5 ' }).maxAmount, '250.5');
+  assert.equal(serverOptionsFromEnv({ CASHMERE_MCP_MAX_TOTAL: '1000' }).maxTotal, '1000');
+  assert.deepEqual(serverOptionsFromEnv({ CASHMERE_MCP_ALLOWED_RECIPIENTS: ` ${SUI_RECIPIENT}, 0xabc ,` }).allowedRecipients, [SUI_RECIPIENT, '0xabc']);
   for (const cap of ['1e6', '-5', 'unlimited', '1,000']) {
     assert.throws(() => serverOptionsFromEnv({ CASHMERE_MCP_MAX_AMOUNT: cap }), /CASHMERE_MCP_MAX_AMOUNT/, cap);
+    assert.throws(() => serverOptionsFromEnv({ CASHMERE_MCP_MAX_TOTAL: cap }), /CASHMERE_MCP_MAX_TOTAL/, cap);
   }
+});
+
+test('RPC and Gas API URLs must use https, and the error leaves the URL out', () => {
+  const secretRpc = 'http://rpc.example/v2/api-key-1234567890';
+  assert.throws(() => serverOptionsFromEnv({ CASHMERE_EVM_PRIVATE_KEY: KEY, CASHMERE_EVM_RPC_URL: secretRpc }), (err: Error) => {
+    assert.equal(err.message, 'CASHMERE_EVM_RPC_URL must use https');
+    return true;
+  });
+  assert.throws(() => serverOptionsFromEnv({ CASHMERE_GAS_API_URL: 'http://gas.example' }), /CASHMERE_GAS_API_URL must use https/);
+  assert.equal(serverOptionsFromEnv({ CASHMERE_EVM_PRIVATE_KEY: KEY, CASHMERE_EVM_RPC_URL: 'http://127.0.0.1:8545' }).config.evm?.rpcUrl, 'http://127.0.0.1:8545');
 });
 
 // Stands in for CashmereCCTP, so cashmere_bridge runs without a chain: no test sends a real transfer
@@ -115,7 +131,6 @@ function stubCctp(transfer: (params: TransferParams) => Promise<TransferResult>)
   return { cctp, calls };
 }
 
-const SUI_RECIPIENT = `0x${'5a'.repeat(32)}`;
 const sent = (params: TransferParams): TransferResult =>
   ({ txHash: `0x${'77'.repeat(32)}`, explorerUrl: 'https://basescan.org/tx/0x77', version: 'v2-fast', from: params.from, to: params.to });
 
@@ -123,7 +138,7 @@ test('cashmere_bridge refuses a recipient in the wrong format and amounts above 
   const { cctp, calls } = stubCctp(async params => sent(params));
   const client = await connect({ config: { evm: { privateKey: KEY } }, maxAmount: '100', cctp });
   const { tools } = await client.listTools();
-  assert.match(tools.find(t => t.name === 'cashmere_bridge')!.description!, /at most 100 USDC per transfer\.$/);
+  assert.match(tools.find(t => t.name === 'cashmere_bridge')!.description!, /at most 100 USDC per transfer\. .*allowDuplicate/);
 
   const bridge = (args: Record<string, string>) => client.callTool({ name: 'cashmere_bridge', arguments: args });
   // an EVM address padded to 32 bytes would mint to a Sui account nobody controls
@@ -232,5 +247,67 @@ test('cashmere_simulate quotes live fees from the gas API', { skip: !process.env
     assert.notEqual(sim.estimatedFee.cashmere, 'unable to fetch', `${from} -> ${to}`);
     assert.equal(typeof sim.estimatedFee.circleBurnBps, 'number');
   }
+  await client.close();
+});
+
+test('a bridge call cancelled while it waits in the queue never sends', async () => {
+  let release!: () => void;
+  const { cctp, calls } = stubCctp(params => new Promise(resolve => { release = () => resolve(sent(params)); }));
+  const client = await connect({ config: { evm: { privateKey: KEY } }, cctp });
+  const bridge = (amount: string, signal?: AbortSignal) =>
+    client.callTool({ name: 'cashmere_bridge', arguments: { from: 'base', to: 'sui', amount, recipient: SUI_RECIPIENT } }, undefined, { signal });
+
+  const first = bridge('1');
+  const controller = new AbortController();
+  const second = bridge('2', controller.signal);
+  await new Promise(r => setTimeout(r, 50));
+  controller.abort();
+  await assert.rejects(second);
+  release();
+  await first;
+  await new Promise(r => setTimeout(r, 50));
+  assert.deepEqual(calls.map(c => c.amount), ['1']);
+  await client.close();
+});
+
+test('an identical transfer within 10 minutes needs allowDuplicate, even after a failure', async () => {
+  let clock = 1_800_000_000_000;
+  let fail = false;
+  const { cctp, calls } = stubCctp(async params => {
+    if (fail) throw new Error('RPC timed out after broadcasting');
+    return sent(params);
+  });
+  const client = await connect({ config: { evm: { privateKey: KEY } }, cctp, now: () => clock });
+  const bridge = (args: Record<string, unknown>) =>
+    client.callTool({ name: 'cashmere_bridge', arguments: { from: 'base', to: 'sui', amount: '5', recipient: SUI_RECIPIENT, ...args } });
+
+  assert.notEqual((await bridge({})).isError, true);
+  const again = await bridge({});
+  assert.equal(again.isError, true);
+  assert.match(JSON.stringify(again.content), /Not sent: an identical transfer was sent \(0x7777/);
+  assert.notEqual((await bridge({ allowDuplicate: true })).isError, true);
+
+  // A failure after signing may still be on chain, so it counts too
+  clock += 11 * 60 * 1000;
+  fail = true;
+  assert.equal((await bridge({})).isError, true);
+  fail = false;
+  assert.match(JSON.stringify((await bridge({})).content), /failed and may still be on chain/);
+  assert.equal(calls.length, 3);
+  await client.close();
+});
+
+test('CASHMERE_MCP_MAX_TOTAL and CASHMERE_MCP_ALLOWED_RECIPIENTS bound what the bridge sends', async () => {
+  const { cctp, calls } = stubCctp(async params => sent(params));
+  const other = `0x${'6b'.repeat(32)}`;
+  const client = await connect({ config: { evm: { privateKey: KEY } }, cctp, maxTotal: '150', allowedRecipients: [SUI_RECIPIENT.toUpperCase().replace('0X', '0x')] });
+  const bridge = (amount: string, recipient = SUI_RECIPIENT) =>
+    client.callTool({ name: 'cashmere_bridge', arguments: { from: 'base', to: 'sui', amount, recipient } });
+
+  assert.match(JSON.stringify((await bridge('10', other)).content), /not one of this server's allowed recipients/);
+  assert.notEqual((await bridge('100')).isError, true);
+  assert.match(JSON.stringify((await bridge('60')).content), /has sent 100 USDC, and 60 more would pass its total limit of 150 USDC/);
+  assert.notEqual((await bridge('50')).isError, true);
+  assert.deepEqual(calls.map(c => c.amount), ['100', '50']);
   await client.close();
 });

@@ -2,7 +2,7 @@
 name: cashmere-usdc-transfers
 description: Send, pay or move USDC across chains with Cashmere CCTP (Circle CCTP V2) between Ethereum, Base, Arbitrum, Optimism, Polygon, Avalanche, Unichain, Linea, World Chain, Sei, Sonic, HyperEVM, Monad, Solana, Aptos and Sui. Use when the user wants to pay someone in USDC on another chain, transfer or bridge USDC between chains, move stablecoin treasury from one chain to another, or compare cross-chain USDC fees, routes and arrival times. Works through the Cashmere MCP tools cashmere_simulate, cashmere_supported_routes and cashmere_bridge.
 license: MIT
-compatibility: Needs the Cashmere MCP server (npx -y @cashmerelabs/cashmere-agent-sdk, Node.js 20.19+) connected to the agent, and network access.
+compatibility: Needs the Cashmere MCP server (npx -y @cashmerelabs/cashmere-agent-sdk@0.2.0, Node.js 22+) connected to the agent, and network access.
 ---
 
 # Cashmere USDC transfers
@@ -48,7 +48,7 @@ first two are listed, the server is read-only or has no key. Tell the user, and 
    To:        Arbitrum
    Recipient: 0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed
    Speed:     V2 Fast, about 15 seconds
-   Fee:       about 0.00034 ETH to Cashmere, up to 1.3 bps to Circle
+   Fee:       about 0.00034 ETH to Cashmere plus its on-chain percentage (at most 1%), up to 1.3 bps to Circle
    ```
 
    If any value changes afterwards, including the version or fee mode, confirm again.
@@ -65,6 +65,8 @@ first two are listed, the server is read-only or has no key. Tell the user, and 
 - If `cashmere_bridge` fails, do not call it again on your own: the transaction may already be on chain. Report the
   error, point the user to the source chain's explorer for their wallet, and let them decide. An error that starts
   with `Not sent:` was refused before anything was signed; fix the values, confirm again, then retry.
+- If `cashmere_bridge` answers that an identical transfer went out in the last 10 minutes, do not resend. Tell the
+  user, and only if they confirm they want it twice, call again with `allowDuplicate: true`.
 - For several payments, such as a payroll or a batch, list each one with the total, get one confirmation for the
   list, then send them one at a time and report each result. Stop at the first failure and ask.
 - For a large amount or a recipient the user has not paid before, suggest a small test transfer first.
@@ -73,7 +75,8 @@ first two are listed, the server is read-only or has no key. Tell the user, and 
 
 ## Fees and what arrives
 
-- **Cashmere fee**: a fixed fee quoted by the Gas API, plus an on-chain percentage of the amount (at most 1%).
+- **Cashmere fee**: a fixed fee quoted by the Gas API, plus an on-chain percentage of the amount (at most 1%). The
+  quote from `cashmere_simulate` shows only the fixed fee.
   - `feeMode: "native"`, the default: the fixed fee is paid in the source chain's gas token, and only the
     percentage comes out of the USDC.
   - `feeMode: "stable"`: the fixed fee also comes out of the USDC, and `cashmere` reads like `"0.19 USDC"`.

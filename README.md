@@ -8,8 +8,8 @@ TypeScript SDK for Cashmere CCTP cross-chain USDC transfers across EVM, Solana, 
 npm install @cashmerelabs/cashmere-agent-sdk
 ```
 
-Requires Node.js 20.19 or later (22+ recommended): the Sui client is an ES module that the CommonJS build loads
-with `require()`. Sui fullnodes no longer serve JSON-RPC, so the Sui `rpcUrl` is a gRPC endpoint (default
+Requires Node.js 22 or later: the Sui client is an ES module that the CommonJS build loads with `require()`, and
+its dependencies need Node 22. Sui fullnodes no longer serve JSON-RPC, so the Sui `rpcUrl` is a gRPC endpoint (default
 `https://fullnode.mainnet.sui.io:443`).
 
 ## AI Agent / OpenClaw Integration
@@ -17,9 +17,13 @@ with `require()`. Sui fullnodes no longer serve JSON-RPC, so the Sui `rpcUrl` is
 To give Claude Desktop, Claude Code, Hermes Agent or any other MCP client the transfer tools directly, run the
 bundled [MCP server](#mcp-server) and add the [agent skill](#agent-skill) for payments and transfers.
 
-This SDK ships with a `SKILL.md` file that AI agents (Cursor, Codex, OpenClaw,
-LangChain, etc.) can read to understand Cashmere CCTP capabilities. The skill
-file is included in the npm package at `node_modules/@cashmerelabs/cashmere-agent-sdk/SKILL.md`.
+Two files are written for agents, and both ship in the npm package:
+
+- [`skills/cashmere-usdc-transfers/SKILL.md`](skills/cashmere-usdc-transfers/SKILL.md) is the [agent skill](#agent-skill)
+  for sending payments and transfers with the MCP tools.
+- `SKILL.md` at the package root is a developer reference for building transactions against the Cashmere contracts
+  directly: addresses, ABIs, the Gas API and the routing rules. It is not an Agent Skills skill. Agents (Cursor, Codex,
+  OpenClaw, LangChain, etc.) can read it at `node_modules/@cashmerelabs/cashmere-agent-sdk/SKILL.md`.
 
 For OpenClaw-based agents, register the SDK as a tool:
 
@@ -37,12 +41,12 @@ const cctp = new CashmereCCTP({
   solana: { privateKey: process.env.SOLANA_PRIVATE_KEY! },
 });
 
-// Expose cctp.transfer() as an agent tool with SKILL.md as context
+// Expose cctp.transfer() as an agent tool with SKILL.md as context, behind a step where the user confirms each transfer
 ```
 
 The SKILL.md provides:
 - All supported chains, domain IDs, and contract addresses
-- CCTP V1/V2 routing rules and fee structures
+- CCTP V2 routing rules and fee structures (V1 is legacy: the SDK sends every route over V2)
 - Per-chain transfer patterns (EVM, Solana, Aptos, Sui)
 - Gas API integration details
 
@@ -72,6 +76,9 @@ console.log(result.txHash);
 console.log(result.explorerUrl);
 ```
 
+The SDK reads no files: pass the keys from your environment, for example from a `.env` made from `.env.example` and
+loaded with `node --env-file=.env app.js`.
+
 ## Configuration
 
 Only configure the chains you need:
@@ -79,24 +86,24 @@ Only configure the chains you need:
 ```typescript
 // EVM-only bot
 const cctp = new CashmereCCTP({
-  evm: { privateKey: process.env.EVM_KEY! },
+  evm: { privateKey: process.env.EVM_PRIVATE_KEY! },
 });
 
 // With custom RPC
 const cctp = new CashmereCCTP({
   evm: {
-    privateKey: process.env.EVM_KEY!,
+    privateKey: process.env.EVM_PRIVATE_KEY!,
     rpcUrl: 'https://my-rpc.example.com',
   },
   solana: {
-    privateKey: process.env.SOL_KEY!,
+    privateKey: process.env.SOLANA_PRIVATE_KEY!,
     rpcUrl: 'https://my-solana-rpc.example.com',
   },
 });
 
 // Custom Gas API URL
 const cctp = new CashmereCCTP({
-  evm: { privateKey: process.env.EVM_KEY! },
+  evm: { privateKey: process.env.EVM_PRIVATE_KEY! },
   gasApiUrl: 'https://gas.cashmere.exchange',
 });
 ```
@@ -108,8 +115,8 @@ await cctp.transfer({
   from: 'ethereum',        // source chain
   to: 'arbitrum',          // destination chain
   amount: '100',           // USDC amount (human-readable, 6 decimals applied automatically)
-  recipient: '0x...',      // destination address (any format per chain)
-  version: 'v2-fast',      // optional: 'v1' | 'v2-fast' | 'v2-norm' (auto-resolved if omitted)
+  recipient: '0x...',      // destination address in the destination chain's format (checked before signing)
+  version: 'v2-fast',      // optional: 'v2-fast' | 'v2-norm' (auto-resolved if omitted; 'v1' is sent over V2)
   feeMode: 'native',       // optional: 'native' | 'stable' (default: 'native')
 });
 ```
@@ -175,7 +182,7 @@ isV2FastSupported('polygon', 'base');      // false (polygon = V2 Norm only)
 
 // Resolve best version
 resolveVersion('ethereum', 'arbitrum');    // 'v2-fast'
-resolveVersion('aptos', 'sui');            // 'v1'
+resolveVersion('aptos', 'sui');            // 'v2-norm' (Circle quotes no V2 Fast from Aptos)
 
 // Direct Gas API access
 const gas = new GasApiClient();
@@ -194,21 +201,28 @@ const sim = await cctp.simulate({
 console.log(sim.supported);         // true
 console.log(sim.version);           // 'v2-fast'
 console.log(sim.estimatedDuration); // '~15 seconds'
-console.log(sim.estimatedFee);      // { cashmere: '...', circleBurnBps: 1.3 }
+console.log(sim.estimatedFee);      // { cashmere: '343617201738094 wei (native)', circleBurnBps: 1.3 }
 
 if (sim.supported) {
   await cctp.transfer({ from: 'ethereum', to: 'arbitrum', amount: '100', recipient: '0x...' });
 }
 ```
 
+`estimatedFee.cashmere` is Cashmere's fixed fee. With `feeMode: 'native'` (the default) it is in the source chain's
+smallest native unit (wei on EVM chains, lamports, octas, MIST); with `'stable'` it reads like `'0.19 USDC'` and comes out
+of the amount. On top of it, Cashmere takes an on-chain percentage of the amount (at most 1%, not in the quote), and on
+V2 Fast Circle keeps up to `circleBurnBps` basis points when it mints. So the recipient gets slightly less than `amount`.
+
 ## MCP Server
 
 The package includes an MCP server, so Claude Desktop, Claude Code, Hermes Agent and other MCP clients can quote and
-send transfers as tools. It runs over stdio:
+send transfers as tools. It runs over stdio and needs Node.js 22 or later:
 
 ```bash
-npx -y @cashmerelabs/cashmere-agent-sdk
+npx -y @cashmerelabs/cashmere-agent-sdk@0.2.0
 ```
+
+Pin the version as here: the process holds your keys, so it should run exactly the release you chose.
 
 | Tool | What it does |
 |------|--------------|
@@ -222,23 +236,39 @@ npx -y @cashmerelabs/cashmere-agent-sdk
 - Its description tells the agent to confirm the amount, the chains and the recipient with the user before calling it,
   and not to retry a failed call on its own.
 - It is annotated as destructive. In Claude Code it always needs the user's own approval, never a one-tap one.
-- Before signing, it refuses a recipient that is not in the destination chain's address format, which CCTP would
-  otherwise mint to as an account nobody controls, and any amount above `CASHMERE_MCP_MAX_AMOUNT`.
-- It sends one transfer at a time, and its errors never contain a private key.
+- Before signing, it refuses:
+  - a recipient that is not in the destination chain's address format, which CCTP would otherwise mint to as an account
+    nobody controls;
+  - a Gas API quote for another destination, or with a fee or deadline out of bounds;
+  - an amount above `CASHMERE_MCP_MAX_AMOUNT` or past `CASHMERE_MCP_MAX_TOTAL`, or a recipient outside
+    `CASHMERE_MCP_ALLOWED_RECIPIENTS`;
+  - a transfer identical to one from the last 10 minutes, unless the agent passes `allowDuplicate` after asking the user;
+  - a call that the client cancelled or timed out while it waited.
+- It sends one transfer at a time and reports success only once the transaction is confirmed. Its errors never contain
+  a private key.
 
 ### Environment
 
-The server reads its keys from the environment only, as the MCP client config passes them.
+The server reads its settings from the environment only, and only under `CASHMERE_` names. Claude Code passes your
+shell environment to MCP servers, so a key exported there for other tools, such as an `EVM_PRIVATE_KEY`, never becomes a
+wallet the agent can spend from.
 
 | Variable | Effect |
 |----------|--------|
-| `EVM_PRIVATE_KEY`, `SOLANA_PRIVATE_KEY`, `APTOS_PRIVATE_KEY`, `SUI_PRIVATE_KEY` | Wallets `cashmere_bridge` sends from. Set only the chains you need |
+| `CASHMERE_EVM_PRIVATE_KEY`, `CASHMERE_SOLANA_PRIVATE_KEY`, `CASHMERE_APTOS_PRIVATE_KEY`, `CASHMERE_SUI_PRIVATE_KEY` | Wallets `cashmere_bridge` sends from. Set only the chains you need |
 | `CASHMERE_MCP_READ_ONLY=1` | Simulate and routes only: `cashmere_bridge` is off and the keys are not read |
 | `CASHMERE_MCP_MAX_AMOUNT=500` | Largest USDC amount per transfer |
-| `EVM_RPC_URL`, `SOLANA_RPC_URL`, `APTOS_RPC_URL`, `SUI_RPC_URL` | Custom RPCs. `EVM_RPC_URL` serves every EVM source chain, so set it only for a single-chain setup. `SUI_RPC_URL` is a gRPC endpoint |
-| `GAS_API_URL` | Gas API, default `https://gas.cashmere.exchange` |
+| `CASHMERE_MCP_MAX_TOTAL=2000` | Largest USDC total while the server runs |
+| `CASHMERE_MCP_ALLOWED_RECIPIENTS=0x...,9WzD...` | The only recipients `cashmere_bridge` sends to, comma-separated |
+| `CASHMERE_EVM_RPC_URL`, `CASHMERE_SOLANA_RPC_URL`, `CASHMERE_APTOS_RPC_URL`, `CASHMERE_SUI_RPC_URL` | Custom RPCs, https only (or a local node). The EVM one serves every EVM source chain, so set it only for a single-chain setup. The Sui one is a gRPC endpoint |
+| `CASHMERE_GAS_API_URL` | Gas API, https only. Default `https://gas.cashmere.exchange` |
+| `npm_config_ignore_scripts=true` | Set it in the same `env`: `npx` then installs without running dependency install scripts, which would otherwise run with your keys in their environment |
 
-Give the agent a dedicated wallet that holds only what it may spend, plus gas.
+Paste each key as the wallet exports it: hex for EVM wallets such as MetaMask; base58 for Phantom or Solflare, or
+`solana-keygen`'s JSON array; hex or `ed25519-priv-0x...` for Aptos wallets such as Petra; `suiprivkey1...` for
+Slush or Sui Wallet, or hex.
+
+Give the agent a dedicated wallet that holds only what it may spend, plus gas, and set the limits above.
 
 ### Claude Desktop
 
@@ -250,18 +280,19 @@ on macOS, `%APPDATA%\Claude\` on Windows) and restart Claude Desktop:
   "mcpServers": {
     "cashmere": {
       "command": "npx",
-      "args": ["-y", "@cashmerelabs/cashmere-agent-sdk"],
+      "args": ["-y", "@cashmerelabs/cashmere-agent-sdk@0.2.0"],
       "env": {
-        "EVM_PRIVATE_KEY": "0x...",
-        "CASHMERE_MCP_MAX_AMOUNT": "500"
+        "CASHMERE_EVM_PRIVATE_KEY": "0x...",
+        "CASHMERE_MCP_MAX_AMOUNT": "500",
+        "npm_config_ignore_scripts": "true"
       }
     }
   }
 }
 ```
 
-For quotes only, replace the keys with `"CASHMERE_MCP_READ_ONLY": "1"`. Claude Desktop starts `npx` from your `PATH`, which
-needs Node.js 20.19 or later (22+ recommended).
+For quotes only, replace the key with `"CASHMERE_MCP_READ_ONLY": "1"`. Claude Desktop starts `npx` from your `PATH`, which
+needs Node.js 22 or later.
 
 ### Claude Code
 
@@ -276,7 +307,7 @@ On Claude Code before 2.1.275, run `/plugin marketplace add cashmere-prod/cashme
 `/plugin install cashmere@cashmere`. To add only the server:
 
 ```bash
-claude mcp add --env CASHMERE_MCP_READ_ONLY=1 --transport stdio cashmere -- npx -y @cashmerelabs/cashmere-agent-sdk
+claude mcp add --env CASHMERE_MCP_READ_ONLY=1 --env npm_config_ignore_scripts=true --transport stdio cashmere -- npx -y @cashmerelabs/cashmere-agent-sdk@0.2.0
 ```
 
 ### Hermes Agent
@@ -288,10 +319,11 @@ a small safe baseline, not your shell environment, and names the tools `mcp_cash
 mcp_servers:
   cashmere:
     command: "npx"
-    args: ["-y", "@cashmerelabs/cashmere-agent-sdk"]
+    args: ["-y", "@cashmerelabs/cashmere-agent-sdk@0.2.0"]
     env:
-      EVM_PRIVATE_KEY: "0x..."
+      CASHMERE_EVM_PRIVATE_KEY: "0x..."
       CASHMERE_MCP_MAX_AMOUNT: "500"
+      npm_config_ignore_scripts: "true"
 ```
 
 ### From a clone
@@ -310,7 +342,7 @@ skills can use it:
 | Agent | Install |
 |-------|---------|
 | Claude Code | The `cashmere` plugin above includes it |
-| Claude Desktop, claude.ai | Zip the `skills/cashmere-usdc-transfers` folder and upload it with **Upload skill** under Customize → Skills (code execution must be on) |
+| Claude Desktop | Zip the `skills/cashmere-usdc-transfers` folder and upload it with **Upload skill** under Customize → Skills (code execution must be on). The skill drives the local MCP server, so use it in Claude Desktop, not claude.ai in a browser |
 | Hermes Agent | `hermes skills install cashmere-prod/cashmere-agent-sdk/skills/cashmere-usdc-transfers` |
 | Others | Copy the folder into the agent's skills directory, such as `~/.claude/skills/`. It also ships in the npm package |
 
@@ -337,31 +369,43 @@ const response = await openai.chat.completions.create({
 
 ### LangChain
 
+```bash
+npm install @langchain/core @langchain/langgraph @langchain/anthropic
+```
+
 ```typescript
 import { CashmereCCTP } from '@cashmerelabs/cashmere-agent-sdk';
 import { CashmereBridgeTool, CashmereSimulateTool } from '@cashmerelabs/cashmere-agent-sdk/tools/langchain';
+import { createReactAgent } from '@langchain/langgraph/prebuilt';
+import { ChatAnthropic } from '@langchain/anthropic';
 
-const cctp = new CashmereCCTP({ evm: { privateKey: process.env.EVM_KEY! } });
+const cctp = new CashmereCCTP({ evm: { privateKey: process.env.EVM_PRIVATE_KEY! } });
 const tools = [
   new CashmereBridgeTool(cctp),
   new CashmereSimulateTool(cctp),
 ];
 
-// Use with any LangChain agent
-const agent = createReactAgent({ llm, tools });
+// Any LangChain chat model works
+const agent = createReactAgent({ llm: new ChatAnthropic({ model: 'claude-sonnet-5-5' }), tools });
 ```
+
+`CashmereBridgeTool` sends as soon as the agent calls it. Its description tells the model to confirm with the user
+first, but put a human approval step in front of it too (LangGraph supports interrupts), or give the agent only
+`CashmereSimulateTool`.
 
 ### crewAI
 
-crewAI uses LangChain tools natively -- same `CashmereBridgeTool` and `CashmereSimulateTool` classes work directly.
+crewAI is a Python framework, so the TypeScript classes above don't apply. Connect it to the [MCP server](#mcp-server)
+through crewAI's MCP support, or define its tools from the JSON schemas (`bridgeToolSchema`, `simulateToolSchema`,
+`supportedRoutesToolSchema`).
 
 ### Hermes (Nous Research)
 
 Hermes models take tools as OpenAI-style functions inside `<tools>` in the system prompt and answer with
 `<tool_call>{"name": ..., "arguments": ...}</tool_call>` blocks. Behind an OpenAI-compatible server with a Hermes tool
-parser (vLLM `--tool-call-parser hermes`, SGLang, llama.cpp, Ollama), pass `hermesTools()` as `tools` and read
-`tool_calls` as with OpenAI. Hermes Agent can use the [MCP server](#mcp-server) instead. To prompt a Hermes model
-directly, without a chat template:
+parser (vLLM `--enable-auto-tool-choice --tool-call-parser hermes`, SGLang, llama.cpp, Ollama), pass `hermesTools()` as
+`tools`, read `tool_calls` as with OpenAI, and send each result back as a `tool` message with its `tool_call_id`.
+Hermes Agent can use the [MCP server](#mcp-server) instead. To prompt a Hermes model directly, without a chat template:
 
 ```typescript
 import {
@@ -370,6 +414,8 @@ import {
 
 const cctp = new CashmereCCTP({ evm: { privateKey: process.env.EVM_PRIVATE_KEY! } });
 const system = hermesSystemPrompt(hermesTools(), 'You move USDC between chains for the user.');
+// Hermes 2 Pro and 3 read tool results as a `tool` message, Hermes 4 as a `user` message
+const toolResultRole = 'user'; // Hermes 4
 
 // After each model reply. Tool calls inside <think> are skipped.
 for (const call of parseHermesToolCalls(reply)) {
@@ -378,8 +424,7 @@ for (const call of parseHermesToolCalls(reply)) {
   if (call.name === 'cashmere_simulate') result = await cctp.simulate(args);
   else if (call.name === 'cashmere_supported_routes') result = getSupportedRoutes(args);
   else if (call.name === 'cashmere_bridge') result = await confirmWithUserThenTransfer(args); // your own approval step
-  // Hermes 2 Pro and 3 read tool results as a `tool` message, Hermes 4 as a `user` message
-  messages.push({ role: 'tool', content: hermesToolResponse(call.name, result) });
+  messages.push({ role: toolResultRole, content: hermesToolResponse(call.name, result) });
 }
 ```
 

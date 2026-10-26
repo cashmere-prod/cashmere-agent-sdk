@@ -14,7 +14,7 @@ import {
   DURATION_V1, DURATION_V2_FAST, DURATION_V2_NORM,
 } from './constants';
 import { resolveVersion, getThreshold } from './utils/routing';
-import { toBytes32Hex, getSolanaRecipientAndOwner, ZERO_BYTES32, toByteArray } from './utils/address';
+import { toBytes32Hex, getSolanaRecipientAndOwner, ZERO_BYTES32, toByteArray, recipientError } from './utils/address';
 import { evmTransfer } from './chains/evm';
 import { solanaTransfer } from './chains/solana';
 import { aptosTransfer } from './chains/aptos';
@@ -35,6 +35,9 @@ export class CashmereCCTP {
 
     if (from === to) throw new Error(`Cannot transfer to the same chain: ${from}`);
     if (!recipient || recipient.length === 0) throw new Error('Recipient address is required');
+    // CCTP mints to any 32 bytes, so an address in another chain's format would not revert: it would strand the USDC
+    const recipientProblem = recipientError(to, recipient);
+    if (recipientProblem) throw new Error(`Invalid recipient: ${recipientProblem}`);
 
     const parsed = Number(amount);
     if (!amount || isNaN(parsed) || parsed <= 0) {

@@ -4,6 +4,7 @@ import { GasApiClient } from '../gas-api';
 import { createEvmSigner } from '../signers/evm';
 import { CASHMERE_CCTP_ADDRESSES, CCTP_DOMAINS, USDC_ADDRESSES, EXPLORER_URLS, EVM_CHAIN_IDS } from '../constants';
 import { calculateMaxFee } from '../utils/fee';
+import { checkQuote } from '../utils/quote';
 import { getThreshold } from '../utils/routing';
 import type { CctpVersion } from '../types';
 
@@ -79,6 +80,7 @@ export async function evmTransfer(opts: {
   const { fee, deadline, signature } = await gasApiClient.getEcdsaSignature(
     srcDomain, dstDomain, isV2, isNative,
   );
+  checkQuote({ fee, deadline }, { from: srcNetwork, dstDomain, amount, isNative });
 
   const msgValue = isNative ? fee : 0n;
 
@@ -97,7 +99,8 @@ export async function evmTransfer(opts: {
       functionName: 'approve',
       args: [contractAddress, amount],
     });
-    await publicClient.waitForTransactionReceipt({ hash: approveHash });
+    const approval = await publicClient.waitForTransactionReceipt({ hash: approveHash });
+    if (approval.status !== 'success') throw new Error(`USDC approval reverted on ${srcNetwork}: ${approveHash}`);
   }
 
   let txHash: `0x${string}`;
@@ -146,6 +149,10 @@ export async function evmTransfer(opts: {
       value: msgValue,
     });
   }
+
+  // Reported only once mined: a burn that reverts (a batch reusing one allowance, a spent quote) must not read as sent
+  const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash });
+  if (receipt.status !== 'success') throw new Error(`Transfer reverted on ${srcNetwork}: ${txHash}`);
 
   const explorerBase = EXPLORER_URLS[srcNetwork] ?? '';
   return {

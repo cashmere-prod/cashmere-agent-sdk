@@ -32,7 +32,13 @@ export function recipientError(to: Network, recipient: string): string | undefin
     return undefined;
   }
 
-  if (!/^0x[0-9a-fA-F]{64}$/.test(recipient)) return `a ${to} recipient is a 0x address of 64 hex characters`;
+  if (!/^0x[0-9a-fA-F]{64}$/.test(recipient)) {
+    return `a ${to} recipient is a 0x address of 64 hex characters; an EVM address can't receive on ${to}`;
+  }
+  // Aptos and Sui addresses are hashes, so 12 leading zero bytes mean an EVM address padded to 32 bytes
+  if (/^0x0{24}/.test(recipient)) {
+    return `this is an EVM address padded to 32 bytes, which no ${to} account owns; ask for the recipient's ${to} address`;
+  }
   return undefined;
 }
 

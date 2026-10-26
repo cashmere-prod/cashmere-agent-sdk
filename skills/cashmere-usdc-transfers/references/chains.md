@@ -36,6 +36,7 @@ anyway.
 - The wallet (owner) address in base58, such as `9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM`.
 - Not the wallet's USDC token account: the SDK derives that from the wallet. A token account or other program
   address, including a multisig vault, is refused.
+- If the wallet has no USDC token account yet, Cashmere's relayers create it when they mint.
 
 ## Aptos and Sui
 
@@ -46,6 +47,11 @@ anyway.
 
 `cashmere_bridge` answers `Not sent: ...` without signing anything when:
 
-- the recipient does not match the destination chain's format above;
-- the recipient is the zero address or the USDC token itself;
-- the amount is above the server's per-transfer limit (`CASHMERE_MCP_MAX_AMOUNT`).
+- the recipient does not match the destination chain's format above, or is an EVM address padded to 32 bytes for
+  Aptos or Sui;
+- the recipient is the zero address or the USDC token itself, or is not among `CASHMERE_MCP_ALLOWED_RECIPIENTS`;
+- the amount is above the per-transfer limit (`CASHMERE_MCP_MAX_AMOUNT`) or would pass the total limit
+  (`CASHMERE_MCP_MAX_TOTAL`);
+- the Gas API quote is for another destination, or its fee or deadline is out of bounds;
+- an identical transfer went out in the last 10 minutes and `allowDuplicate` is not set;
+- the client cancelled the call before the transfer started.

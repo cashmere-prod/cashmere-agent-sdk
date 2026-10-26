@@ -23,6 +23,7 @@ import {
 } from '../constants';
 import { toByteArray } from '../utils/address';
 import { calculateMaxFee } from '../utils/fee';
+import { checkQuote } from '../utils/quote';
 import { getThreshold } from '../utils/routing';
 import idl from './cashmere_cctp_idl.json';
 
@@ -85,6 +86,10 @@ export async function solanaTransfer(opts: {
   const sigData = await gasApiClient.getEd25519Signature(
     CCTP_DOMAINS.solana, dstDomain, isNative, isV2 ? 2 : 1,
   );
+  checkQuote(
+    { fee: BigInt(sigData.fee), deadline: BigInt(sigData.deadline), destinationDomain: sigData.destinationDomain },
+    { from: 'solana', dstDomain, amount, isNative },
+  );
 
   const signatureIx = Ed25519Program.createInstructionWithPublicKey({
     publicKey: sigData.publicKey,
@@ -99,7 +104,7 @@ export async function solanaTransfer(opts: {
     transferIx = await (program.methods as any)
       .transfer(
         new BN(amount.toString()),
-        sigData.destinationDomain,
+        dstDomain,
         recipient,
         solanaOwner,
         new BN(sigData.fee),
@@ -127,7 +132,7 @@ export async function solanaTransfer(opts: {
     transferIx = await (program.methods as any)
       .transferV2(
         new BN(amount.toString()),
-        sigData.destinationDomain,
+        dstDomain,
         recipient,
         solanaOwner,
         new BN(sigData.fee),
@@ -173,6 +178,13 @@ export async function solanaTransfer(opts: {
   tx.sign([keypair, cctpMessageSigner]);
 
   const txHash = await connection.sendTransaction(tx);
+
+  // Reported only once confirmed: a dropped or failed transaction must not read as sent
+  const confirmation = await connection.confirmTransaction(
+    { signature: txHash, blockhash: blockhash.blockhash, lastValidBlockHeight: blockhash.lastValidBlockHeight },
+    'confirmed',
+  );
+  if (confirmation.value.err) throw new Error(`Transfer failed on Solana: ${txHash} (${JSON.stringify(confirmation.value.err)})`);
 
   return {
     txHash,
