@@ -8,6 +8,10 @@ TypeScript SDK for Cashmere CCTP cross-chain USDC transfers across EVM, Solana, 
 npm install @cashmerelabs/cashmere-agent-sdk
 ```
 
+Requires Node.js 20.19 or later (22+ recommended): the Sui client is an ES module that the CommonJS build loads
+with `require()`. Sui fullnodes no longer serve JSON-RPC, so the Sui `rpcUrl` is a gRPC endpoint (default
+`https://fullnode.mainnet.sui.io:443`).
+
 ## AI Agent / OpenClaw Integration
 
 This SDK ships with a `SKILL.md` file that AI agents (Cursor, Codex, OpenClaw,
@@ -109,10 +113,9 @@ await cctp.transfer({
 
 ### Version Auto-Resolution
 
-If `version` is omitted, the SDK picks the best available version:
-1. V2 Fast (if supported for the route)
-2. V2 Norm (if supported)
-3. V1 (fallback)
+If `version` is omitted, the SDK picks V2 Fast where the route supports it and V2 Norm otherwise. Every route has
+CCTP V2, Aptos and Sui included, so the SDK does not use V1: Circle is retiring V1 burns, and a requested `v1`
+falls back to V2 the same way an unsupported `v2-fast` falls back to `v2-norm`.
 
 ### Solana Recipients
 
@@ -138,15 +141,18 @@ await cctp.transfer({
 | Unichain        | Y  | Y       | Y       | All EVM, Solana, Aptos, Sui     |
 | Polygon         | Y  | N       | Y       | All EVM, Solana, Aptos, Sui     |
 | Avalanche       | Y  | N       | Y       | All EVM, Solana, Aptos, Sui     |
-| Linea           | N  | Y       | Y       | EVM, Solana only                |
-| Worldchain      | N  | Y       | Y       | EVM, Solana only                |
-| Sei             | N  | N       | Y       | EVM, Solana only                |
-| Sonic           | N  | N       | Y       | EVM, Solana only                |
-| HyperEVM        | N  | N       | Y       | EVM, Solana only                |
-| Monad           | N  | N       | Y       | EVM, Solana only                |
+| Linea           | N  | Y       | Y       | All EVM, Solana, Aptos, Sui     |
+| Worldchain      | N  | Y       | Y       | All EVM, Solana, Aptos, Sui     |
+| Sei             | N  | N       | Y       | All EVM, Solana, Aptos, Sui     |
+| Sonic           | N  | N       | Y       | All EVM, Solana, Aptos, Sui     |
+| HyperEVM        | N  | N       | Y       | All EVM, Solana, Aptos, Sui     |
+| Monad           | N  | N       | Y       | All EVM, Solana, Aptos, Sui     |
 | Solana          | Y  | N       | Y       | All EVM, Aptos, Sui             |
-| Aptos           | Y  | N       | N       | Legacy EVM, Solana, Sui         |
-| Sui             | Y  | N       | N       | Legacy EVM, Solana, Aptos       |
+| Aptos           | Y  | N       | Y       | All EVM, Solana, Sui            |
+| Sui             | Y  | N       | Y       | All EVM, Solana, Aptos          |
+
+V1 shows what the contracts still accept; the SDK sends every route over V2. Circle quotes no Fast fee from Aptos or
+Sui, so transfers from them go V2 Norm; transfers to them go V2 Fast where the source has it.
 
 ## Utilities
 

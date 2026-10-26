@@ -5,8 +5,9 @@ const V1_UNSUPPORTED: Network[] = [
   'linea', 'worldchain', 'sei', 'sonic', 'hyperevm', 'monad',
 ];
 
+// Circle quotes no Fast fee from Aptos or Sui, so transfers from them use V2 Norm
 const V2_FAST_UNSUPPORTED_SOURCES: Network[] = [
-  'avalanche', 'sei', 'sonic', 'polygon', 'solana', 'hyperevm', 'monad',
+  'avalanche', 'sei', 'sonic', 'polygon', 'solana', 'hyperevm', 'monad', 'aptos', 'sui',
 ];
 
 export function isV1Supported(from: Network, to: Network): boolean {
@@ -29,15 +30,10 @@ export function isV1Supported(from: Network, to: Network): boolean {
   return nonEvmPairs.some(([a, b]) => a === from && b === to);
 }
 
+// Every supported network has CCTP V2: Aptos and Sui since their Cashmere contracts were upgraded
+// (Aptos transfer_v2_outer, Sui prepare_deposit_for_burn_v2)
 export function isV2Supported(from: Network, to: Network): boolean {
-  const fromEvm = isEvmNetwork(from);
-  const toEvm = isEvmNetwork(to);
-
-  return (
-    (fromEvm && toEvm) ||
-    (fromEvm && to === 'solana') ||
-    (from === 'solana' && toEvm)
-  );
+  return from !== to;
 }
 
 export function isV2FastSupported(from: Network, to: Network): boolean {
@@ -51,7 +47,8 @@ export function isV2NormSupported(from: Network, to: Network): boolean {
 export function resolveVersion(from: Network, to: Network, requested?: CctpVersion): CctpVersion {
   if (requested === 'v2-fast' && isV2FastSupported(from, to)) return 'v2-fast';
   if (requested === 'v2-norm' && isV2NormSupported(from, to)) return 'v2-norm';
-  if (requested === 'v1' && isV1Supported(from, to)) return 'v1';
+  // V1 only where a route has no V2: Circle is retiring V1 burns
+  if (requested === 'v1' && isV1Supported(from, to) && !isV2Supported(from, to)) return 'v1';
 
   if (isV2FastSupported(from, to)) return 'v2-fast';
   if (isV2NormSupported(from, to)) return 'v2-norm';

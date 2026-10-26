@@ -96,6 +96,7 @@ export class CashmereCCTP {
         amount: amountRaw,
         recipient: recipientBytes32,
         solanaOwner: solanaOwnerBytes32,
+        version,
         feeMode,
         gasApiClient: this.gasApi,
       });
@@ -108,6 +109,7 @@ export class CashmereCCTP {
         amount: amountRaw,
         recipient: recipientBytes32,
         solanaOwner: solanaOwnerBytes32,
+        version,
         feeMode,
         gasApiClient: this.gasApi,
       });
