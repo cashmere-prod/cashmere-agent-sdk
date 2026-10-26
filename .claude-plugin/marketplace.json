@@ -1,0 +1,16 @@
+{
+  "name": "cashmere",
+  "owner": {
+    "name": "Cashmere Labs",
+    "url": "https://cashmere.exchange"
+  },
+  "description": "Cashmere Labs plugins: cross-chain USDC payments and transfers",
+  "plugins": [
+    {
+      "name": "cashmere",
+      "source": "./",
+      "description": "Cross-chain USDC payments and transfers over Cashmere CCTP: MCP server and skill",
+      "category": "payments"
+    }
+  ]
+}

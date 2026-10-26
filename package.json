@@ -4,12 +4,15 @@
   "description": "Cashmere CCTP cross-chain USDC transfer SDK for EVM, Solana, Aptos, and Sui",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
-  "files": ["dist", "SKILL.md"],
+  "bin": {
+    "cashmere-mcp": "dist/mcp/cli.js"
+  },
+  "files": ["dist", "SKILL.md", "skills"],
   "scripts": {
     "build": "tsc",
     "clean": "rm -rf dist",
     "prepublishOnly": "npm run clean && npm run build",
-    "test": "tsx --test src/utils/routing.test.ts src/chains/aptos.test.ts src/chains/sui.test.ts"
+    "test": "tsx --test src/utils/routing.test.ts src/chains/aptos.test.ts src/chains/sui.test.ts src/utils/address.test.ts src/tools/hermes.test.ts src/mcp/server.test.ts"
   },
   "dependencies": {
     "viem": "^2.21.0",
@@ -18,8 +21,9 @@
     "@coral-xyz/anchor": "^0.30.0",
     "@aptos-labs/ts-sdk": "^1.33.0",
     "@mysten/sui": "^2.34.0",
+    "@modelcontextprotocol/sdk": "^1.32.2",
     "bs58": "^6.0.0",
-    "zod": "^3.23.0"
+    "zod": "^3.25.0"
   },
   "peerDependencies": {
     "@langchain/core": ">=0.2.0"

@@ -195,5 +195,10 @@ export type {
 
 export { CCTP_DOMAINS, CASHMERE_CCTP_ADDRESSES, USDC_ADDRESSES, EXPLORER_URLS, ALL_NETWORKS, isEvmNetwork } from './constants';
 export { isV1Supported, isV2Supported, isV2FastSupported, isV2NormSupported, resolveVersion } from './utils/routing';
+export { recipientError } from './utils/address';
 export { GasApiClient } from './gas-api';
-export { bridgeToolSchema, simulateToolSchema } from './tool-schema';
+export { bridgeToolSchema, simulateToolSchema, supportedRoutesToolSchema } from './tool-schema';
+export { getSupportedRoutes } from './utils/supported-routes';
+export type { SupportedRoutes } from './utils/supported-routes';
+export { hermesTools, hermesSystemPrompt, parseHermesToolCalls, hermesToolResponse } from './tools/hermes';
+export type { HermesTool, HermesToolCall } from './tools/hermes';

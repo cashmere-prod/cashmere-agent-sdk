@@ -14,6 +14,9 @@ with `require()`. Sui fullnodes no longer serve JSON-RPC, so the Sui `rpcUrl` is
 
 ## AI Agent / OpenClaw Integration
 
+To give Claude Desktop, Claude Code, Hermes Agent or any other MCP client the transfer tools directly, run the
+bundled [MCP server](#mcp-server) and add the [agent skill](#agent-skill) for payments and transfers.
+
 This SDK ships with a `SKILL.md` file that AI agents (Cursor, Codex, OpenClaw,
 LangChain, etc.) can read to understand Cashmere CCTP capabilities. The skill
 file is included in the npm package at `node_modules/@cashmerelabs/cashmere-agent-sdk/SKILL.md`.
@@ -198,16 +201,130 @@ if (sim.supported) {
 }
 ```
 
+## MCP Server
+
+The package includes an MCP server, so Claude Desktop, Claude Code, Hermes Agent and other MCP clients can quote and
+send transfers as tools. It runs over stdio:
+
+```bash
+npx -y @cashmerelabs/cashmere-agent-sdk
+```
+
+| Tool | What it does |
+|------|--------------|
+| `cashmere_supported_routes` | Routes, CCTP versions, default version and durations, optionally filtered by `from` and `to`. Read-only |
+| `cashmere_simulate` | Fee, version and duration of a transfer, from the live Gas API and Circle Iris. Read-only |
+| `cashmere_bridge` | Sends the transfer and returns its hash and explorer link |
+
+`cashmere_bridge` moves funds, so:
+
+- It is listed only when a private key is set and `CASHMERE_MCP_READ_ONLY` is not.
+- Its description tells the agent to confirm the amount, the chains and the recipient with the user before calling it,
+  and not to retry a failed call on its own.
+- It is annotated as destructive. In Claude Code it always needs the user's own approval, never a one-tap one.
+- Before signing, it refuses a recipient that is not in the destination chain's address format, which CCTP would
+  otherwise mint to as an account nobody controls, and any amount above `CASHMERE_MCP_MAX_AMOUNT`.
+- It sends one transfer at a time, and its errors never contain a private key.
+
+### Environment
+
+The server reads its keys from the environment only, as the MCP client config passes them.
+
+| Variable | Effect |
+|----------|--------|
+| `EVM_PRIVATE_KEY`, `SOLANA_PRIVATE_KEY`, `APTOS_PRIVATE_KEY`, `SUI_PRIVATE_KEY` | Wallets `cashmere_bridge` sends from. Set only the chains you need |
+| `CASHMERE_MCP_READ_ONLY=1` | Simulate and routes only: `cashmere_bridge` is off and the keys are not read |
+| `CASHMERE_MCP_MAX_AMOUNT=500` | Largest USDC amount per transfer |
+| `EVM_RPC_URL`, `SOLANA_RPC_URL`, `APTOS_RPC_URL`, `SUI_RPC_URL` | Custom RPCs. `EVM_RPC_URL` serves every EVM source chain, so set it only for a single-chain setup. `SUI_RPC_URL` is a gRPC endpoint |
+| `GAS_API_URL` | Gas API, default `https://gas.cashmere.exchange` |
+
+Give the agent a dedicated wallet that holds only what it may spend, plus gas.
+
+### Claude Desktop
+
+Add the server to `claude_desktop_config.json` (Settings → Developer → Edit Config: `~/Library/Application Support/Claude/`
+on macOS, `%APPDATA%\Claude\` on Windows) and restart Claude Desktop:
+
+```json
+{
+  "mcpServers": {
+    "cashmere": {
+      "command": "npx",
+      "args": ["-y", "@cashmerelabs/cashmere-agent-sdk"],
+      "env": {
+        "EVM_PRIVATE_KEY": "0x...",
+        "CASHMERE_MCP_MAX_AMOUNT": "500"
+      }
+    }
+  }
+}
+```
+
+For quotes only, replace the keys with `"CASHMERE_MCP_READ_ONLY": "1"`. Claude Desktop starts `npx` from your `PATH`, which
+needs Node.js 20.19 or later (22+ recommended).
+
+### Claude Code
+
+This repository is also a Claude Code plugin marketplace. The `cashmere` plugin brings the MCP server and the
+[agent skill](#agent-skill) together, and asks for the optional keys, which it keeps in the system keychain:
+
+```bash
+/plugin install cashmere --marketplace cashmere-prod/cashmere-agent-sdk
+```
+
+On Claude Code before 2.1.275, run `/plugin marketplace add cashmere-prod/cashmere-agent-sdk`, then
+`/plugin install cashmere@cashmere`. To add only the server:
+
+```bash
+claude mcp add --env CASHMERE_MCP_READ_ONLY=1 --transport stdio cashmere -- npx -y @cashmerelabs/cashmere-agent-sdk
+```
+
+### Hermes Agent
+
+Add the server under `mcp_servers` in `~/.hermes/config.yaml`. Hermes passes a stdio server the `env` listed here plus
+a small safe baseline, not your shell environment, and names the tools `mcp_cashmere_cashmere_simulate` and so on:
+
+```yaml
+mcp_servers:
+  cashmere:
+    command: "npx"
+    args: ["-y", "@cashmerelabs/cashmere-agent-sdk"]
+    env:
+      EVM_PRIVATE_KEY: "0x..."
+      CASHMERE_MCP_MAX_AMOUNT: "500"
+```
+
+### From a clone
+
+Run `npm install && npm run build`, then point the client at the built file instead of `npx`:
+`"command": "node", "args": ["/path/to/cashmere-agent-sdk/dist/mcp/cli.js"]`.
+
+## Agent Skill
+
+[`skills/cashmere-usdc-transfers`](skills/cashmere-usdc-transfers/SKILL.md) teaches an agent to run USDC payments and
+transfers with the MCP tools. The agent collects the amount, the chains and the recipient, checks the address format,
+quotes the transfer and confirms it with the user. Only then does it send, and it reports the result. The skill also
+covers fees, speed and failures. It follows the [Agent Skills](https://agentskills.io) format, so any agent that reads
+skills can use it:
+
+| Agent | Install |
+|-------|---------|
+| Claude Code | The `cashmere` plugin above includes it |
+| Claude Desktop, claude.ai | Zip the `skills/cashmere-usdc-transfers` folder and upload it with **Upload skill** under Customize → Skills (code execution must be on) |
+| Hermes Agent | `hermes skills install cashmere-prod/cashmere-agent-sdk/skills/cashmere-usdc-transfers` |
+| Others | Copy the folder into the agent's skills directory, such as `~/.claude/skills/`. It also ships in the npm package |
+
 ## Agent Framework Integration
 
 ### OpenAI Assistants / Function Calling
 
 ```typescript
-import { bridgeToolSchema, simulateToolSchema } from '@cashmerelabs/cashmere-agent-sdk';
+import { bridgeToolSchema, simulateToolSchema, supportedRoutesToolSchema } from '@cashmerelabs/cashmere-agent-sdk';
 
 const tools = [
   { type: "function", function: bridgeToolSchema },
   { type: "function", function: simulateToolSchema },
+  { type: "function", function: supportedRoutesToolSchema },
 ];
 
 // Pass to OpenAI chat completion
@@ -238,6 +355,37 @@ const agent = createReactAgent({ llm, tools });
 
 crewAI uses LangChain tools natively -- same `CashmereBridgeTool` and `CashmereSimulateTool` classes work directly.
 
+### Hermes (Nous Research)
+
+Hermes models take tools as OpenAI-style functions inside `<tools>` in the system prompt and answer with
+`<tool_call>{"name": ..., "arguments": ...}</tool_call>` blocks. Behind an OpenAI-compatible server with a Hermes tool
+parser (vLLM `--tool-call-parser hermes`, SGLang, llama.cpp, Ollama), pass `hermesTools()` as `tools` and read
+`tool_calls` as with OpenAI. Hermes Agent can use the [MCP server](#mcp-server) instead. To prompt a Hermes model
+directly, without a chat template:
+
+```typescript
+import {
+  CashmereCCTP, getSupportedRoutes, hermesTools, hermesSystemPrompt, parseHermesToolCalls, hermesToolResponse,
+} from '@cashmerelabs/cashmere-agent-sdk';
+
+const cctp = new CashmereCCTP({ evm: { privateKey: process.env.EVM_PRIVATE_KEY! } });
+const system = hermesSystemPrompt(hermesTools(), 'You move USDC between chains for the user.');
+
+// After each model reply. Tool calls inside <think> are skipped.
+for (const call of parseHermesToolCalls(reply)) {
+  const args = call.arguments as any;
+  let result: unknown;
+  if (call.name === 'cashmere_simulate') result = await cctp.simulate(args);
+  else if (call.name === 'cashmere_supported_routes') result = getSupportedRoutes(args);
+  else if (call.name === 'cashmere_bridge') result = await confirmWithUserThenTransfer(args); // your own approval step
+  // Hermes 2 Pro and 3 read tool results as a `tool` message, Hermes 4 as a `user` message
+  messages.push({ role: 'tool', content: hermesToolResponse(call.name, result) });
+}
+```
+
+`hermesTools({ readOnly: true })` leaves `cashmere_bridge` out. `recipientError(to, recipient)` runs the same address
+check as the MCP server.
+
 ## How It Works
 
 1. SDK builds and signs a source-chain transaction (burn USDC via Cashmere wrapper)
@@ -249,6 +397,7 @@ crewAI uses LangChain tools natively -- same `CashmereBridgeTool` and `CashmereS
 - Private keys are only used in-memory for transaction signing
 - Never stored, logged, or transmitted anywhere except to the chain RPC
 - The Gas API (`gas.cashmere.exchange`) only receives domain/fee parameters, never keys
+- The MCP server reads keys from its environment only, never logs them, and redacts them from tool errors
 - All contract addresses are public on-chain data
 
 ## Build
