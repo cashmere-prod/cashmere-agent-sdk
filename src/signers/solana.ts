@@ -9,7 +9,12 @@ export function createSolanaSigner(
   let secretKey: Uint8Array;
 
   if (privateKey.startsWith('[')) {
-    secretKey = new Uint8Array(JSON.parse(privateKey));
+    try {
+      secretKey = new Uint8Array(JSON.parse(privateKey));
+    } catch {
+      // JSON.parse quotes the text around the error
+      throw new Error('Solana private key is not a valid JSON byte array');
+    }
   } else if (privateKey.startsWith('0x')) {
     secretKey = new Uint8Array(Buffer.from(privateKey.slice(2), 'hex'));
   } else {

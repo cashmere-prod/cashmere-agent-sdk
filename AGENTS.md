@@ -36,7 +36,10 @@ through the Cashmere contracts, on 13 EVM chains, Solana, Aptos and Sui. It sign
 - Never print, log or commit a private key, error messages included. The MCP server redacts configured keys from tool
   errors: keep it that way.
 - The MCP server's stdout carries JSON-RPC. Log to stderr only.
-- The build is CommonJS (`module: nodenext`). `@mysten/sui` is ESM and loaded with `require()`, hence Node.js 20.19+.
+- The build is CommonJS (`module: nodenext`). `@mysten/sui` is ESM and loaded with `require()`; its dependencies need
+  Node.js 22+.
+- The MCP server reads only `CASHMERE_` environment variables: Claude Code passes the user's shell environment to MCP
+  servers, and a key exported there for other tools must not become a wallet the agent can spend from.
 - Tests live in `src/**/*.test.ts`, and each new file goes into the `test` script in `package.json`.
 
 ## Keep in sync
@@ -52,6 +55,8 @@ When routing, chains, fees or tool behaviour change, update every place that res
 ## Release
 
 1. Bump `version` in `package.json`. The MCP server reports it.
-2. Run `npm run build && npm test && CASHMERE_LIVE=1 npm test`.
-3. The owner runs `npm publish`. `npx -y @cashmerelabs/cashmere-agent-sdk` and the Claude Code plugin run the
-   published package, so nothing that documents a new feature should ship before it.
+2. Move the pinned version in `npx -y @cashmerelabs/cashmere-agent-sdk@<version>` to it everywhere: `.claude-plugin/plugin.json`,
+   `README.md`, `skills/cashmere-usdc-transfers/` and the docs site. The server holds keys, so the docs pin exact versions.
+3. Run `npm run build && npm test && CASHMERE_LIVE=1 npm test`.
+4. The owner runs `npm publish`. `npx` and the Claude Code plugin run the published package, so nothing that documents
+   a new feature should ship before it.

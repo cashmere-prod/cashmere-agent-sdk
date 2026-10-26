@@ -8,8 +8,8 @@ TypeScript SDK for Cashmere CCTP cross-chain USDC transfers across EVM, Solana, 
 npm install @cashmerelabs/cashmere-agent-sdk
 ```
 
-Requires Node.js 20.19 or later (22+ recommended): the Sui client is an ES module that the CommonJS build loads
-with `require()`. Sui fullnodes no longer serve JSON-RPC, so the Sui `rpcUrl` is a gRPC endpoint (default
+Requires Node.js 22 or later: the Sui client is an ES module that the CommonJS build loads with `require()`, and
+its dependencies need Node 22. Sui fullnodes no longer serve JSON-RPC, so the Sui `rpcUrl` is a gRPC endpoint (default
 `https://fullnode.mainnet.sui.io:443`).
 
 ## AI Agent / OpenClaw Integration
@@ -216,11 +216,13 @@ V2 Fast Circle keeps up to `circleBurnBps` basis points when it mints. So the re
 ## MCP Server
 
 The package includes an MCP server, so Claude Desktop, Claude Code, Hermes Agent and other MCP clients can quote and
-send transfers as tools. It runs over stdio:
+send transfers as tools. It runs over stdio and needs Node.js 22 or later:
 
 ```bash
-npx -y @cashmerelabs/cashmere-agent-sdk
+npx -y @cashmerelabs/cashmere-agent-sdk@0.2.0
 ```
+
+Pin the version as here: the process holds your keys, so it should run exactly the release you chose.
 
 | Tool | What it does |
 |------|--------------|
@@ -234,27 +236,39 @@ npx -y @cashmerelabs/cashmere-agent-sdk
 - Its description tells the agent to confirm the amount, the chains and the recipient with the user before calling it,
   and not to retry a failed call on its own.
 - It is annotated as destructive. In Claude Code it always needs the user's own approval, never a one-tap one.
-- Before signing, it refuses a recipient that is not in the destination chain's address format, which CCTP would
-  otherwise mint to as an account nobody controls, and any amount above `CASHMERE_MCP_MAX_AMOUNT`.
-- It sends one transfer at a time, and its errors never contain a private key.
+- Before signing, it refuses:
+  - a recipient that is not in the destination chain's address format, which CCTP would otherwise mint to as an account
+    nobody controls;
+  - a Gas API quote for another destination, or with a fee or deadline out of bounds;
+  - an amount above `CASHMERE_MCP_MAX_AMOUNT` or past `CASHMERE_MCP_MAX_TOTAL`, or a recipient outside
+    `CASHMERE_MCP_ALLOWED_RECIPIENTS`;
+  - a transfer identical to one from the last 10 minutes, unless the agent passes `allowDuplicate` after asking the user;
+  - a call that the client cancelled or timed out while it waited.
+- It sends one transfer at a time and reports success only once the transaction is confirmed. Its errors never contain
+  a private key.
 
 ### Environment
 
-The server reads its keys from the environment only, as the MCP client config passes them.
+The server reads its settings from the environment only, and only under `CASHMERE_` names. Claude Code passes your
+shell environment to MCP servers, so a key exported there for other tools, such as an `EVM_PRIVATE_KEY`, never becomes a
+wallet the agent can spend from.
 
 | Variable | Effect |
 |----------|--------|
-| `EVM_PRIVATE_KEY`, `SOLANA_PRIVATE_KEY`, `APTOS_PRIVATE_KEY`, `SUI_PRIVATE_KEY` | Wallets `cashmere_bridge` sends from. Set only the chains you need |
+| `CASHMERE_EVM_PRIVATE_KEY`, `CASHMERE_SOLANA_PRIVATE_KEY`, `CASHMERE_APTOS_PRIVATE_KEY`, `CASHMERE_SUI_PRIVATE_KEY` | Wallets `cashmere_bridge` sends from. Set only the chains you need |
 | `CASHMERE_MCP_READ_ONLY=1` | Simulate and routes only: `cashmere_bridge` is off and the keys are not read |
 | `CASHMERE_MCP_MAX_AMOUNT=500` | Largest USDC amount per transfer |
-| `EVM_RPC_URL`, `SOLANA_RPC_URL`, `APTOS_RPC_URL`, `SUI_RPC_URL` | Custom RPCs. `EVM_RPC_URL` serves every EVM source chain, so set it only for a single-chain setup. `SUI_RPC_URL` is a gRPC endpoint |
-| `GAS_API_URL` | Gas API, default `https://gas.cashmere.exchange` |
+| `CASHMERE_MCP_MAX_TOTAL=2000` | Largest USDC total while the server runs |
+| `CASHMERE_MCP_ALLOWED_RECIPIENTS=0x...,9WzD...` | The only recipients `cashmere_bridge` sends to, comma-separated |
+| `CASHMERE_EVM_RPC_URL`, `CASHMERE_SOLANA_RPC_URL`, `CASHMERE_APTOS_RPC_URL`, `CASHMERE_SUI_RPC_URL` | Custom RPCs, https only (or a local node). The EVM one serves every EVM source chain, so set it only for a single-chain setup. The Sui one is a gRPC endpoint |
+| `CASHMERE_GAS_API_URL` | Gas API, https only. Default `https://gas.cashmere.exchange` |
+| `npm_config_ignore_scripts=true` | Set it in the same `env`: `npx` then installs without running dependency install scripts, which would otherwise run with your keys in their environment |
 
 Paste each key as the wallet exports it: hex for EVM wallets such as MetaMask; base58 for Phantom or Solflare, or
 `solana-keygen`'s JSON array; hex or `ed25519-priv-0x...` for Aptos wallets such as Petra; `suiprivkey1...` for
 Slush or Sui Wallet, or hex.
 
-Give the agent a dedicated wallet that holds only what it may spend, plus gas.
+Give the agent a dedicated wallet that holds only what it may spend, plus gas, and set the limits above.
 
 ### Claude Desktop
 
@@ -266,18 +280,19 @@ on macOS, `%APPDATA%\Claude\` on Windows) and restart Claude Desktop:
   "mcpServers": {
     "cashmere": {
       "command": "npx",
-      "args": ["-y", "@cashmerelabs/cashmere-agent-sdk"],
+      "args": ["-y", "@cashmerelabs/cashmere-agent-sdk@0.2.0"],
       "env": {
-        "EVM_PRIVATE_KEY": "0x...",
-        "CASHMERE_MCP_MAX_AMOUNT": "500"
+        "CASHMERE_EVM_PRIVATE_KEY": "0x...",
+        "CASHMERE_MCP_MAX_AMOUNT": "500",
+        "npm_config_ignore_scripts": "true"
       }
     }
   }
 }
 ```
 
-For quotes only, replace the keys with `"CASHMERE_MCP_READ_ONLY": "1"`. Claude Desktop starts `npx` from your `PATH`, which
-needs Node.js 20.19 or later (22+ recommended).
+For quotes only, replace the key with `"CASHMERE_MCP_READ_ONLY": "1"`. Claude Desktop starts `npx` from your `PATH`, which
+needs Node.js 22 or later.
 
 ### Claude Code
 
@@ -292,7 +307,7 @@ On Claude Code before 2.1.275, run `/plugin marketplace add cashmere-prod/cashme
 `/plugin install cashmere@cashmere`. To add only the server:
 
 ```bash
-claude mcp add --env CASHMERE_MCP_READ_ONLY=1 --transport stdio cashmere -- npx -y @cashmerelabs/cashmere-agent-sdk
+claude mcp add --env CASHMERE_MCP_READ_ONLY=1 --env npm_config_ignore_scripts=true --transport stdio cashmere -- npx -y @cashmerelabs/cashmere-agent-sdk@0.2.0
 ```
 
 ### Hermes Agent
@@ -304,10 +319,11 @@ a small safe baseline, not your shell environment, and names the tools `mcp_cash
 mcp_servers:
   cashmere:
     command: "npx"
-    args: ["-y", "@cashmerelabs/cashmere-agent-sdk"]
+    args: ["-y", "@cashmerelabs/cashmere-agent-sdk@0.2.0"]
     env:
-      EVM_PRIVATE_KEY: "0x..."
+      CASHMERE_EVM_PRIVATE_KEY: "0x..."
       CASHMERE_MCP_MAX_AMOUNT: "500"
+      npm_config_ignore_scripts: "true"
 ```
 
 ### From a clone

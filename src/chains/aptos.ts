@@ -4,6 +4,7 @@ import { GasApiClient } from '../gas-api';
 import { createAptosSigner } from '../signers/aptos';
 import { getThreshold } from '../utils/routing';
 import { calculateMaxFee } from '../utils/fee';
+import { checkQuote } from '../utils/quote';
 import { CCTP_DOMAINS, APTOS_TRANSFER_MODULE } from '../constants';
 
 export interface AptosTransferPayloadParams {
@@ -65,6 +66,10 @@ export async function aptosTransfer(opts: {
 
   const sigData = await gasApiClient.getEd25519Signature(
     CCTP_DOMAINS.aptos, dstDomain, isNative, isV2 ? 2 : undefined,
+  );
+  checkQuote(
+    { fee: BigInt(sigData.fee), deadline: BigInt(sigData.deadline), destinationDomain: sigData.destinationDomain },
+    { from: 'aptos', dstDomain, amount, isNative },
   );
 
   let v2: AptosTransferPayloadParams['v2'];

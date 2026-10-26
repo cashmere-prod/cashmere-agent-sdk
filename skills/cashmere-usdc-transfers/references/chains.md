@@ -47,6 +47,11 @@ anyway.
 
 `cashmere_bridge` answers `Not sent: ...` without signing anything when:
 
-- the recipient does not match the destination chain's format above;
-- the recipient is the zero address or the USDC token itself;
-- the amount is above the server's per-transfer limit (`CASHMERE_MCP_MAX_AMOUNT`).
+- the recipient does not match the destination chain's format above, or is an EVM address padded to 32 bytes for
+  Aptos or Sui;
+- the recipient is the zero address or the USDC token itself, or is not among `CASHMERE_MCP_ALLOWED_RECIPIENTS`;
+- the amount is above the per-transfer limit (`CASHMERE_MCP_MAX_AMOUNT`) or would pass the total limit
+  (`CASHMERE_MCP_MAX_TOTAL`);
+- the Gas API quote is for another destination, or its fee or deadline is out of bounds;
+- an identical transfer went out in the last 10 minutes and `allowDuplicate` is not set;
+- the client cancelled the call before the transfer started.

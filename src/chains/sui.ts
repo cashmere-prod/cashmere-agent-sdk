@@ -5,6 +5,7 @@ import { GasApiClient } from '../gas-api';
 import { createSuiSigner } from '../signers/sui';
 import { getThreshold } from '../utils/routing';
 import { calculateMaxFee } from '../utils/fee';
+import { checkQuote } from '../utils/quote';
 import {
   CCTP_DOMAINS,
   SUI_CASHMERE_PACKAGE,
@@ -179,6 +180,10 @@ export async function suiTransfer(opts: {
 
   const sigData = await gasApiClient.getEd25519Signature(
     CCTP_DOMAINS.sui, dstDomain, isNative, isV2 ? 2 : undefined,
+  );
+  checkQuote(
+    { fee: BigInt(sigData.fee), deadline: BigInt(sigData.deadline), destinationDomain: sigData.destinationDomain },
+    { from: 'sui', dstDomain, amount, isNative },
   );
 
   let v2: SuiTransferTxParams['v2'];
