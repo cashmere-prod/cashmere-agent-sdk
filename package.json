@@ -12,7 +12,7 @@
     "build": "tsc",
     "clean": "rm -rf dist",
     "prepublishOnly": "npm run clean && npm run build",
-    "test": "tsx --test src/utils/routing.test.ts src/chains/aptos.test.ts src/chains/sui.test.ts src/utils/address.test.ts src/tools/hermes.test.ts src/mcp/server.test.ts"
+    "test": "tsx --test src/utils/routing.test.ts src/chains/aptos.test.ts src/chains/sui.test.ts src/signers/sui.test.ts src/utils/address.test.ts src/tools/hermes.test.ts src/mcp/server.test.ts"
   },
   "dependencies": {
     "viem": "^2.21.0",
