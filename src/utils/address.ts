@@ -1,6 +1,40 @@
 import { PublicKey } from '@solana/web3.js';
 import { ASSOCIATED_TOKEN_PROGRAM_ID, TOKEN_PROGRAM_ID } from '@solana/spl-token';
-import { SOLANA_USDC_MINT } from '../constants';
+import { isAddress } from 'viem';
+import type { Network } from '../types';
+import { SOLANA_USDC_MINT, USDC_ADDRESSES, isEvmNetwork } from '../constants';
+
+// Why `recipient` can't receive USDC on `to`, or undefined when it can. CCTP takes any 32 bytes, so an address in
+// another chain's format would not fail: the USDC would arrive at an account nobody controls.
+export function recipientError(to: Network, recipient: string): string | undefined {
+  if (Object.values(USDC_ADDRESSES).some(usdc => usdc.toLowerCase() === recipient.toLowerCase())) {
+    return 'the recipient is the USDC token itself, not a wallet';
+  }
+
+  if (isEvmNetwork(to)) {
+    if (!isAddress(recipient)) return `a ${to} recipient is a 0x address of 40 hex characters, with a valid checksum if mixed-case`;
+    if (/^0x0{40}$/.test(recipient)) return 'the recipient is the zero address';
+    return undefined;
+  }
+
+  if (to === 'solana') {
+    let key: PublicKey;
+    try {
+      key = new PublicKey(recipient);
+    } catch {
+      return 'a solana recipient is a base58 wallet address';
+    }
+    // USDC goes to the token account the SDK derives from the wallet; a token account or other program address
+    // given here would get a token account of its own that no key can spend from
+    if (key.toBase58() !== recipient || !PublicKey.isOnCurve(key.toBytes())) {
+      return 'a solana recipient is the wallet (owner) address, not a token account or program address';
+    }
+    return undefined;
+  }
+
+  if (!/^0x[0-9a-fA-F]{64}$/.test(recipient)) return `a ${to} recipient is a 0x address of 64 hex characters`;
+  return undefined;
+}
 
 export function toBytes32Hex(address: string): `0x${string}` {
   const clean = address.startsWith('0x') ? address.slice(2) : address;

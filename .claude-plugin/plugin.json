@@ -1,0 +1,64 @@
+{
+  "name": "cashmere",
+  "displayName": "Cashmere USDC transfers",
+  "description": "Cross-chain USDC payments and transfers over Cashmere CCTP: an MCP server that quotes, lists routes and sends, and a skill that runs transfers with the user's confirmation",
+  "author": {
+    "name": "Cashmere Labs",
+    "url": "https://cashmere.exchange"
+  },
+  "homepage": "https://github.com/cashmere-prod/cashmere-agent-sdk",
+  "repository": "https://github.com/cashmere-prod/cashmere-agent-sdk",
+  "license": "MIT",
+  "keywords": ["usdc", "stablecoin", "payments", "cctp", "cross-chain", "bridge"],
+  "mcpServers": {
+    "cashmere": {
+      "command": "npx",
+      "args": ["-y", "@cashmerelabs/cashmere-agent-sdk"],
+      "env": {
+        "EVM_PRIVATE_KEY": "${user_config.evm_private_key}",
+        "SOLANA_PRIVATE_KEY": "${user_config.solana_private_key}",
+        "APTOS_PRIVATE_KEY": "${user_config.aptos_private_key}",
+        "SUI_PRIVATE_KEY": "${user_config.sui_private_key}",
+        "CASHMERE_MCP_READ_ONLY": "${user_config.read_only}",
+        "CASHMERE_MCP_MAX_AMOUNT": "${user_config.max_amount}"
+      }
+    }
+  },
+  "userConfig": {
+    "read_only": {
+      "type": "boolean",
+      "title": "Read-only",
+      "description": "Quotes and routes only: cashmere_bridge stays off and the keys below are not read",
+      "default": false
+    },
+    "max_amount": {
+      "type": "string",
+      "title": "Largest transfer (USDC)",
+      "description": "cashmere_bridge refuses transfers above this amount, such as 500. Leave empty for no limit"
+    },
+    "evm_private_key": {
+      "type": "string",
+      "title": "EVM private key",
+      "description": "Hex key of the wallet that sends from EVM chains. Leave empty to skip",
+      "sensitive": true
+    },
+    "solana_private_key": {
+      "type": "string",
+      "title": "Solana private key",
+      "description": "Base58, hex or JSON-array key of the wallet that sends from Solana. Leave empty to skip",
+      "sensitive": true
+    },
+    "aptos_private_key": {
+      "type": "string",
+      "title": "Aptos private key",
+      "description": "Hex key of the wallet that sends from Aptos. Leave empty to skip",
+      "sensitive": true
+    },
+    "sui_private_key": {
+      "type": "string",
+      "title": "Sui private key",
+      "description": "Hex key of the wallet that sends from Sui. Leave empty to skip",
+      "sensitive": true
+    }
+  }
+}
