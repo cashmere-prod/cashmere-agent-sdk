@@ -223,7 +223,7 @@ The package includes an MCP server, so Claude Desktop, Claude Code, Hermes Agent
 send transfers as tools. It runs over stdio and needs Node.js 22 or later:
 
 ```bash
-npx -y @cashmerelabs/cashmere-agent-sdk@0.2.0
+npx -y @cashmerelabs/cashmere-agent-sdk@0.3.0
 ```
 
 Pin the version as here: the process holds your keys, so it should run exactly the release you chose.
@@ -284,7 +284,7 @@ on macOS, `%APPDATA%\Claude\` on Windows) and restart Claude Desktop:
   "mcpServers": {
     "cashmere": {
       "command": "npx",
-      "args": ["-y", "@cashmerelabs/cashmere-agent-sdk@0.2.0"],
+      "args": ["-y", "@cashmerelabs/cashmere-agent-sdk@0.3.0"],
       "env": {
         "CASHMERE_EVM_PRIVATE_KEY": "0x...",
         "CASHMERE_MCP_MAX_AMOUNT": "500",
@@ -311,7 +311,7 @@ On Claude Code before 2.1.275, run `/plugin marketplace add cashmere-prod/cashme
 `/plugin install cashmere@cashmere`. To add only the server:
 
 ```bash
-claude mcp add --env CASHMERE_MCP_READ_ONLY=1 --env npm_config_ignore_scripts=true --transport stdio cashmere -- npx -y @cashmerelabs/cashmere-agent-sdk@0.2.0
+claude mcp add --env CASHMERE_MCP_READ_ONLY=1 --env npm_config_ignore_scripts=true --transport stdio cashmere -- npx -y @cashmerelabs/cashmere-agent-sdk@0.3.0
 ```
 
 ### Hermes Agent
@@ -323,7 +323,7 @@ a small safe baseline, not your shell environment, and names the tools `mcp_cash
 mcp_servers:
   cashmere:
     command: "npx"
-    args: ["-y", "@cashmerelabs/cashmere-agent-sdk@0.2.0"]
+    args: ["-y", "@cashmerelabs/cashmere-agent-sdk@0.3.0"]
     env:
       CASHMERE_EVM_PRIVATE_KEY: "0x..."
       CASHMERE_MCP_MAX_AMOUNT: "500"
