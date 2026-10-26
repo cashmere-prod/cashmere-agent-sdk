@@ -36,6 +36,7 @@ anyway.
 - The wallet (owner) address in base58, such as `9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM`.
 - Not the wallet's USDC token account: the SDK derives that from the wallet. A token account or other program
   address, including a multisig vault, is refused.
+- If the wallet has no USDC token account yet, Cashmere's relayers create it when they mint.
 
 ## Aptos and Sui
 

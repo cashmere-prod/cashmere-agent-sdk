@@ -48,7 +48,7 @@ first two are listed, the server is read-only or has no key. Tell the user, and 
    To:        Arbitrum
    Recipient: 0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed
    Speed:     V2 Fast, about 15 seconds
-   Fee:       about 0.00034 ETH to Cashmere, up to 1.3 bps to Circle
+   Fee:       about 0.00034 ETH to Cashmere plus its on-chain percentage (at most 1%), up to 1.3 bps to Circle
    ```
 
    If any value changes afterwards, including the version or fee mode, confirm again.
@@ -73,7 +73,8 @@ first two are listed, the server is read-only or has no key. Tell the user, and 
 
 ## Fees and what arrives
 
-- **Cashmere fee**: a fixed fee quoted by the Gas API, plus an on-chain percentage of the amount (at most 1%).
+- **Cashmere fee**: a fixed fee quoted by the Gas API, plus an on-chain percentage of the amount (at most 1%). The
+  quote from `cashmere_simulate` shows only the fixed fee.
   - `feeMode: "native"`, the default: the fixed fee is paid in the source chain's gas token, and only the
     percentage comes out of the USDC.
   - `feeMode: "stable"`: the fixed fee also comes out of the USDC, and `cashmere` reads like `"0.19 USDC"`.

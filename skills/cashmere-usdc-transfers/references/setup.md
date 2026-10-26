@@ -35,6 +35,9 @@ Add the server to `claude_desktop_config.json` (Settings → Developer → Edit 
 }
 ```
 
+For quotes only, use `"env": { "CASHMERE_MCP_READ_ONLY": "1" }` instead. The skill needs this local server, so it works
+in Claude Desktop, not in claude.ai in a browser.
+
 ## Hermes Agent
 
 Add it under `mcp_servers` in `~/.hermes/config.yaml`. The tools then appear as `mcp_cashmere_cashmere_simulate`

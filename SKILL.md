@@ -1,10 +1,15 @@
-# Cashmere CCTP Cross-Chain USDC Transfer Skill
+# Cashmere CCTP Developer Reference
 
-Use this skill when the user asks about Cashmere cross-chain USDC transfers, CCTP
-contract calls, bridging between EVM / Solana / Aptos / Sui, or building
-transactions against the Cashmere wrapper contracts.
+Reference for building transactions against the Cashmere wrapper contracts directly: CCTP domains, versions and fees,
+contract addresses, the Gas API, per-chain transfer patterns and routing rules.
 
-This skill covers **source-side burns only** (sending USDC cross-chain).
+- To send payments or transfers as an agent, use the Cashmere MCP tools with the agent skill in
+  `skills/cashmere-usdc-transfers/SKILL.md`. This file is not an Agent Skills skill.
+- To send from code, use the SDK (`CashmereCCTP.transfer()`), which implements everything below.
+- The SDK sends every route over CCTP V2. V1 sections are legacy: Circle cuts V1 burn limits from 31 Oct 2026 and stops
+  V1 burns on 1 Dec 2026.
+
+This reference covers **source-side burns only** (sending USDC cross-chain).
 Destination-side claim/mint is handled automatically by Cashmere's own relayers --
 no user or SDK action is needed after the source transaction confirms.
 
@@ -125,13 +130,6 @@ below to every destination, Aptos and Sui included.
 | Unichain      | ~15 seconds        |
 | Worldchain    | ~15 seconds        |
 | Linea         | ~15 seconds        |
-| Polygon       | ~8 seconds         |
-| Avalanche     | ~8 seconds         |
-| Sonic         | ~8 seconds         |
-| Monad         | ~8 seconds         |
-| HyperEVM      | ~5 seconds         |
-| Sei           | ~5 seconds         |
-| Solana        | ~15 seconds        |
 
 **Circle burn fee:** Variable BPS from Circle Iris API. Fetched per route.
 `minFinalityThreshold = 1000`.
@@ -331,20 +329,18 @@ GET /getEd25519Sig_native?localDomain={domain}&destinationDomain={domain}&isNati
 
 Frontend converts hex strings to `Buffer`: `Buffer.from(sig.slice(2), 'hex')`.
 
-### Circle V2 Burn Fee (via Netlify proxy to Iris)
+### Circle V2 Burn Fee (Circle Iris)
 
 ```
-GET /.netlify/functions/get-burn-fees?localDomain={d}&destinationDomain={d}&threshold={1000|2000}
+GET https://iris-api.circle.com/v2/burn/USDC/fees/{localDomain}/{destinationDomain}
 ```
 
-Proxies to: `https://iris-api.circle.com/v2/burn/USDC/fees/{localDomain}/{destinationDomain}`
-
-**Response:**
+**Response:** one entry per finality threshold. Use the one that matches the `minFinalityThreshold` you send:
 ```json
-{
-  "finalityThreshold": 1000,
-  "minimumFee": 1.3
-}
+[
+  { "finalityThreshold": 1000, "minimumFee": 1.3 },
+  { "finalityThreshold": 2000, "minimumFee": 0 }
+]
 ```
 
 `minimumFee` is in BPS (can be fractional).
@@ -400,7 +396,7 @@ struct PermitParams {
 }
 ```
 
-### TypeScript Example (viem)
+### TypeScript Example (wagmi)
 
 ```typescript
 import { writeContract, simulateContract } from '@wagmi/core';
@@ -453,10 +449,11 @@ async function evmCctpTransfer(
 
     return writeContract(config, { /* same params */ });
   } else {
-    // V2: fetch burn fee from Circle Iris
-    const burnFee = await fetch(
-      `/.netlify/functions/get-burn-fees?localDomain=${srcDomain}&destinationDomain=${dstDomain}&threshold=1000`
+    // V2: fetch burn fee from Circle Iris, for the threshold sent below
+    const fees: { finalityThreshold: number; minimumFee: number }[] = await fetch(
+      `https://iris-api.circle.com/v2/burn/USDC/fees/${srcDomain}/${dstDomain}`
     ).then(r => r.json());
+    const burnFee = fees.find(f => f.finalityThreshold === 1000);
 
     const bpsTenths = Math.ceil((burnFee.minimumFee ?? 100) * 10);
     const maxFee = (amount * BigInt(bpsTenths) + 99999n) / 100000n;
@@ -535,7 +532,10 @@ Uses Address Lookup Table `865YCTTsymGpBjLMTvjd3T3RCGT8yvxnAHhyKZqRFfLi` for com
 }
 ```
 
-### TypeScript Example
+### TypeScript Example (V1, legacy)
+
+The SDK sends V2 instead: `transferV2` adds `max_fee` and `min_finality_threshold` and uses the V2 MessageTransmitter and
+TokenMessengerMinter programs. See `src/chains/solana.ts` in the SDK.
 
 ```typescript
 import { Program } from '@coral-xyz/anchor';
@@ -609,11 +609,15 @@ async function solanaCctpTransfer(
 ### Entry Function
 
 ```
-{MODULE_ADDR}::transfer::transfer_outer
+{MODULE_ADDR}::transfer::transfer_outer      // V1 (legacy)
+{MODULE_ADDR}::transfer::transfer_v2_outer   // V2: what the SDK sends
 ```
 Where `MODULE_ADDR = 0xe49afb1896889e3e1dd7bcbb9e31d1df8221899d3d368e98588ac6b4d84b136d`
 
 ### Arguments (positional)
+
+`transfer_outer` takes these. `transfer_v2_outer` takes the same, plus `max_fee: u64` (index 9) and
+`min_finality_threshold: u32` (index 10), so the signature moves to index 11.
 
 | Index | Type       | Description                                     |
 |-------|------------|-------------------------------------------------|
@@ -628,7 +632,9 @@ Where `MODULE_ADDR = 0xe49afb1896889e3e1dd7bcbb9e31d1df8221899d3d368e98588ac6b4d
 | 8     | bool       | isNative                                        |
 | 9     | vector<u8> | Ed25519 signature bytes                         |
 
-### TypeScript Example
+### TypeScript Example (V1, legacy)
+
+The SDK sends V2 instead: `transfer_v2_outer` (section 3), built in `src/chains/aptos.ts` in the SDK.
 
 ```typescript
 import { InputEntryFunctionData } from '@aptos-labs/ts-sdk';
@@ -688,9 +694,9 @@ async function aptosCctpTransfer(
 
 ## 8. Sui Transfer Pattern
 
-### Three-Step PTB (Programmable Transaction Block)
+### V1 (legacy): Three-Step PTB (Programmable Transaction Block)
 
-Sui uses a single atomic PTB with three `moveCall` steps:
+V1 uses a single atomic PTB with three `moveCall` steps. V2 uses four calls on the V2 packages (section 3):
 
 #### Step 1: Cashmere prepare
 
@@ -719,7 +725,9 @@ target: {package}::transfer::post_deposit_for_burn
 arguments: [burnMessage, message, depositInfo, configObject]
 ```
 
-### TypeScript Example
+### TypeScript Example (V1, legacy)
+
+The SDK sends V2 instead: the four-call package-auth transaction in section 3, built in `src/chains/sui.ts` in the SDK.
 
 ```typescript
 import { Transaction, coinWithBalance } from '@mysten/sui/transactions';
@@ -824,70 +832,52 @@ All chains encode the destination address as **bytes32**:
 
 ## 10. Version Routing Rules — Per Chain
 
-### Source Chain Capabilities
+Generated from `src/utils/routing.ts`. Every route (each chain to each other chain) has CCTP V2, and the SDK sends
+every route over V2. Without a `version`, it picks V2 Fast where the source has it and V2 Norm otherwise; a requested
+`v1` falls back the same way.
 
-Which CCTP versions each chain can **send from**:
+| Source     | V2 Fast | V2 Norm | Default   | Duration (default)  | V1 (legacy) |
+|------------|---------|---------|-----------|---------------------|-------------|
+| Ethereum   | Y       | Y       | v2-fast   | ~15 seconds         | Y           |
+| Avalanche  | N       | Y       | v2-norm   | ~8 seconds          | Y           |
+| Polygon    | N       | Y       | v2-norm   | ~8 seconds          | Y           |
+| Arbitrum   | Y       | Y       | v2-fast   | ~15 seconds         | Y           |
+| Optimism   | Y       | Y       | v2-fast   | ~15 seconds         | Y           |
+| Base       | Y       | Y       | v2-fast   | ~15 seconds         | Y           |
+| Unichain   | Y       | Y       | v2-fast   | ~15 seconds         | Y           |
+| Linea      | Y       | Y       | v2-fast   | ~15 seconds         | N           |
+| Worldchain | Y       | Y       | v2-fast   | ~15 seconds         | N           |
+| Sei        | N       | Y       | v2-norm   | ~5 seconds          | N           |
+| Sonic      | N       | Y       | v2-norm   | ~8 seconds          | N           |
+| HyperEVM   | N       | Y       | v2-norm   | ~5 seconds          | N           |
+| Monad      | N       | Y       | v2-norm   | ~8 seconds          | N           |
+| Solana     | N       | Y       | v2-norm   | ~25 seconds         | Y           |
+| Aptos      | N       | Y       | v2-norm   | ~8 seconds          | Y           |
+| Sui        | N       | Y       | v2-norm   | ~8 seconds          | Y           |
 
-| Source Chain | V1 (0 BPS) | V2 Fast (1000) | V2 Norm (2000) | Possible Destinations                          |
-|--------------|------------|----------------|----------------|-------------------------------------------------|
-| Ethereum     | Y          | Y              | Y              | All EVM, Solana, Aptos, Sui                     |
-| Arbitrum     | Y          | Y              | Y              | All EVM, Solana, Aptos, Sui                     |
-| Base         | Y          | Y              | Y              | All EVM, Solana, Aptos, Sui                     |
-| Optimism     | Y          | Y              | Y              | All EVM, Solana, Aptos, Sui                     |
-| Unichain     | Y          | Y              | Y              | All EVM, Solana, Aptos, Sui                     |
-| Polygon      | Y          | N              | Y              | All EVM, Solana, Aptos, Sui                     |
-| Avalanche    | Y          | N              | Y              | All EVM, Solana, Aptos, Sui                     |
-| Linea        | N          | Y              | Y              | All EVM, Solana only (V2-only chain)            |
-| Worldchain   | N          | Y              | Y              | All EVM, Solana only (V2-only chain)            |
-| Sei          | N          | N              | Y              | All EVM, Solana only (V2-only, no V2 Fast)      |
-| Sonic        | N          | N              | Y              | All EVM, Solana only (V2-only, no V2 Fast)      |
-| HyperEVM     | N          | N              | Y              | All EVM, Solana only (V2-only, no V2 Fast)      |
-| Monad        | N          | N              | Y              | All EVM, Solana only (V2-only, no V2 Fast)      |
-| Solana       | Y          | N              | Y              | All EVM (V1+V2 Norm), Aptos (V1), Sui (V1)     |
-| Aptos        | Y          | N              | N              | V1-legacy EVM, Solana, Sui (V1 only)            |
-| Sui          | Y          | N              | N              | V1-legacy EVM, Solana, Aptos (V1 only)          |
+The default duration applies to every destination: it depends on the source chain's finality. V2 Norm from Ethereum,
+Arbitrum, Base, Optimism, Unichain and Worldchain takes about 15 minutes, and from Linea about 24 hours.
 
-### Destination Chain Constraints
+### V2 Fast Sources
 
-Which versions can **send to** each destination:
+Only these chains can send V2 Fast (threshold 1000): `ethereum`, `arbitrum`, `optimism`, `base`, `unichain`, `linea`,
+`worldchain`. All others send V2 Norm (threshold 2000); Circle quotes no Fast fee from them.
 
-| Destination  | Can receive V1 | Can receive V2 | Notes                                       |
-|--------------|---------------|----------------|----------------------------------------------|
-| Ethereum     | Y             | Y              |                                              |
-| Arbitrum     | Y             | Y              |                                              |
-| Base         | Y             | Y              |                                              |
-| Optimism     | Y             | Y              |                                              |
-| Unichain     | Y             | Y              |                                              |
-| Polygon      | Y             | Y              |                                              |
-| Avalanche    | Y             | Y              |                                              |
-| Linea        | N             | Y              | V2-only destination                          |
-| Worldchain   | N             | Y              | V2-only destination                          |
-| Sei          | N             | Y              | V2-only destination                          |
-| Sonic        | N             | Y              | V2-only destination                          |
-| HyperEVM     | N             | Y              | V2-only destination                          |
-| Monad        | N             | Y              | V2-only destination                          |
-| Solana       | Y             | Y              | V1 from any; V2 from EVM only               |
-| Aptos        | Y             | N              | V1 only (from V1-legacy EVM, Solana, Sui)    |
-| Sui          | Y             | N              | V1 only (from V1-legacy EVM, Solana, Aptos)  |
+### V1 (legacy)
 
-### V1-Unsupported Chains (V2-only)
-
-These chains have **no V1 support** — neither as source nor destination:
-`linea`, `worldchain`, `sei`, `sonic`, `hyperevm`, `monad`, `stable`, `megaeth`
-
-### V2 Fast-Unsupported Sources
-
-These chains can only send V2 Norm (threshold 2000), **not** V2 Fast (threshold 1000):
-`avalanche`, `sei`, `sonic`, `polygon`, `solana`, `hyperevm`, `monad`
+The contracts still accept V1 between `ethereum`, `avalanche`, `polygon`, `arbitrum`, `optimism`, `base`, `unichain`,
+`solana`, `aptos` and `sui`. These chains never had V1: `linea`, `worldchain`, `sei`, `sonic`, `hyperevm`, `monad`.
 
 ---
 
 ## 11. Source Code References
 
-| Area       | Path                                                     |
-|------------|----------------------------------------------------------|
-| EVM Contract | `evm/src/CashmereCCTP.sol`                             |
-| Solana Program | `sol/programs/cashmere_cctp/src/`                    |
-| Solana IDL   | `sol/target/idl/cashmere_cctp.json`                    |
-| Aptos Module | `aptos/build/cashmere_cctp/sources/transfer.move`      |
-| Sui Module   | `sui/sources/transfer.move`                            |
+| Area                 | Where                                                                  |
+|----------------------|------------------------------------------------------------------------|
+| EVM contract         | `evm/src/CashmereCCTP.sol` in github.com/cashmere-prod/contracts-prod  |
+| Solana program       | `solana/programs/cashmere_cctp/src/` in contracts-prod                 |
+| Aptos module         | `aptos/sources/transfer.move` in contracts-prod                        |
+| Sui module           | `sui/sources/transfer.move` in contracts-prod                          |
+| Solana IDL           | `src/chains/cashmere_cctp_idl.json` in this SDK                        |
+| Transaction builders | `src/chains/evm.ts`, `solana.ts`, `aptos.ts`, `sui.ts` in this SDK     |
+| Routing rules        | `src/utils/routing.ts` in this SDK                                     |

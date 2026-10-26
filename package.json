@@ -4,6 +4,26 @@
   "description": "Cashmere CCTP cross-chain USDC transfer SDK for EVM, Solana, Aptos, and Sui",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./tools/langchain": {
+      "types": "./dist/tools/langchain.d.ts",
+      "default": "./dist/tools/langchain.js"
+    },
+    "./SKILL.md": "./SKILL.md",
+    "./skills/*": "./skills/*",
+    "./dist/*.js": "./dist/*.js",
+    "./dist/*": "./dist/*.js",
+    "./package.json": "./package.json"
+  },
+  "typesVersions": {
+    "*": {
+      "tools/langchain": ["dist/tools/langchain.d.ts"]
+    }
+  },
   "bin": {
     "cashmere-mcp": "dist/mcp/cli.js"
   },

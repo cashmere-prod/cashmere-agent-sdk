@@ -17,9 +17,13 @@ with `require()`. Sui fullnodes no longer serve JSON-RPC, so the Sui `rpcUrl` is
 To give Claude Desktop, Claude Code, Hermes Agent or any other MCP client the transfer tools directly, run the
 bundled [MCP server](#mcp-server) and add the [agent skill](#agent-skill) for payments and transfers.
 
-This SDK ships with a `SKILL.md` file that AI agents (Cursor, Codex, OpenClaw,
-LangChain, etc.) can read to understand Cashmere CCTP capabilities. The skill
-file is included in the npm package at `node_modules/@cashmerelabs/cashmere-agent-sdk/SKILL.md`.
+Two files are written for agents, and both ship in the npm package:
+
+- [`skills/cashmere-usdc-transfers/SKILL.md`](skills/cashmere-usdc-transfers/SKILL.md) is the [agent skill](#agent-skill)
+  for sending payments and transfers with the MCP tools.
+- `SKILL.md` at the package root is a developer reference for building transactions against the Cashmere contracts
+  directly: addresses, ABIs, the Gas API and the routing rules. It is not an Agent Skills skill. Agents (Cursor, Codex,
+  OpenClaw, LangChain, etc.) can read it at `node_modules/@cashmerelabs/cashmere-agent-sdk/SKILL.md`.
 
 For OpenClaw-based agents, register the SDK as a tool:
 
@@ -37,12 +41,12 @@ const cctp = new CashmereCCTP({
   solana: { privateKey: process.env.SOLANA_PRIVATE_KEY! },
 });
 
-// Expose cctp.transfer() as an agent tool with SKILL.md as context
+// Expose cctp.transfer() as an agent tool with SKILL.md as context, behind a step where the user confirms each transfer
 ```
 
 The SKILL.md provides:
 - All supported chains, domain IDs, and contract addresses
-- CCTP V1/V2 routing rules and fee structures
+- CCTP V2 routing rules and fee structures (V1 is legacy: the SDK sends every route over V2)
 - Per-chain transfer patterns (EVM, Solana, Aptos, Sui)
 - Gas API integration details
 
@@ -72,6 +76,9 @@ console.log(result.txHash);
 console.log(result.explorerUrl);
 ```
 
+The SDK reads no files: pass the keys from your environment, for example from a `.env` made from `.env.example` and
+loaded with `node --env-file=.env app.js`.
+
 ## Configuration
 
 Only configure the chains you need:
@@ -79,24 +86,24 @@ Only configure the chains you need:
 ```typescript
 // EVM-only bot
 const cctp = new CashmereCCTP({
-  evm: { privateKey: process.env.EVM_KEY! },
+  evm: { privateKey: process.env.EVM_PRIVATE_KEY! },
 });
 
 // With custom RPC
 const cctp = new CashmereCCTP({
   evm: {
-    privateKey: process.env.EVM_KEY!,
+    privateKey: process.env.EVM_PRIVATE_KEY!,
     rpcUrl: 'https://my-rpc.example.com',
   },
   solana: {
-    privateKey: process.env.SOL_KEY!,
+    privateKey: process.env.SOLANA_PRIVATE_KEY!,
     rpcUrl: 'https://my-solana-rpc.example.com',
   },
 });
 
 // Custom Gas API URL
 const cctp = new CashmereCCTP({
-  evm: { privateKey: process.env.EVM_KEY! },
+  evm: { privateKey: process.env.EVM_PRIVATE_KEY! },
   gasApiUrl: 'https://gas.cashmere.exchange',
 });
 ```
@@ -108,8 +115,8 @@ await cctp.transfer({
   from: 'ethereum',        // source chain
   to: 'arbitrum',          // destination chain
   amount: '100',           // USDC amount (human-readable, 6 decimals applied automatically)
-  recipient: '0x...',      // destination address (any format per chain)
-  version: 'v2-fast',      // optional: 'v1' | 'v2-fast' | 'v2-norm' (auto-resolved if omitted)
+  recipient: '0x...',      // destination address in the destination chain's format (checked before signing)
+  version: 'v2-fast',      // optional: 'v2-fast' | 'v2-norm' (auto-resolved if omitted; 'v1' is sent over V2)
   feeMode: 'native',       // optional: 'native' | 'stable' (default: 'native')
 });
 ```
@@ -175,7 +182,7 @@ isV2FastSupported('polygon', 'base');      // false (polygon = V2 Norm only)
 
 // Resolve best version
 resolveVersion('ethereum', 'arbitrum');    // 'v2-fast'
-resolveVersion('aptos', 'sui');            // 'v1'
+resolveVersion('aptos', 'sui');            // 'v2-norm' (Circle quotes no V2 Fast from Aptos)
 
 // Direct Gas API access
 const gas = new GasApiClient();
@@ -194,12 +201,17 @@ const sim = await cctp.simulate({
 console.log(sim.supported);         // true
 console.log(sim.version);           // 'v2-fast'
 console.log(sim.estimatedDuration); // '~15 seconds'
-console.log(sim.estimatedFee);      // { cashmere: '...', circleBurnBps: 1.3 }
+console.log(sim.estimatedFee);      // { cashmere: '343617201738094 wei (native)', circleBurnBps: 1.3 }
 
 if (sim.supported) {
   await cctp.transfer({ from: 'ethereum', to: 'arbitrum', amount: '100', recipient: '0x...' });
 }
 ```
+
+`estimatedFee.cashmere` is Cashmere's fixed fee. With `feeMode: 'native'` (the default) it is in the source chain's
+smallest native unit (wei on EVM chains, lamports, octas, MIST); with `'stable'` it reads like `'0.19 USDC'` and comes out
+of the amount. On top of it, Cashmere takes an on-chain percentage of the amount (at most 1%, not in the quote), and on
+V2 Fast Circle keeps up to `circleBurnBps` basis points when it mints. So the recipient gets slightly less than `amount`.
 
 ## MCP Server
 
@@ -310,7 +322,7 @@ skills can use it:
 | Agent | Install |
 |-------|---------|
 | Claude Code | The `cashmere` plugin above includes it |
-| Claude Desktop, claude.ai | Zip the `skills/cashmere-usdc-transfers` folder and upload it with **Upload skill** under Customize → Skills (code execution must be on) |
+| Claude Desktop | Zip the `skills/cashmere-usdc-transfers` folder and upload it with **Upload skill** under Customize → Skills (code execution must be on). The skill drives the local MCP server, so use it in Claude Desktop, not claude.ai in a browser |
 | Hermes Agent | `hermes skills install cashmere-prod/cashmere-agent-sdk/skills/cashmere-usdc-transfers` |
 | Others | Copy the folder into the agent's skills directory, such as `~/.claude/skills/`. It also ships in the npm package |
 
@@ -337,31 +349,43 @@ const response = await openai.chat.completions.create({
 
 ### LangChain
 
+```bash
+npm install @langchain/core @langchain/langgraph @langchain/anthropic
+```
+
 ```typescript
 import { CashmereCCTP } from '@cashmerelabs/cashmere-agent-sdk';
 import { CashmereBridgeTool, CashmereSimulateTool } from '@cashmerelabs/cashmere-agent-sdk/tools/langchain';
+import { createReactAgent } from '@langchain/langgraph/prebuilt';
+import { ChatAnthropic } from '@langchain/anthropic';
 
-const cctp = new CashmereCCTP({ evm: { privateKey: process.env.EVM_KEY! } });
+const cctp = new CashmereCCTP({ evm: { privateKey: process.env.EVM_PRIVATE_KEY! } });
 const tools = [
   new CashmereBridgeTool(cctp),
   new CashmereSimulateTool(cctp),
 ];
 
-// Use with any LangChain agent
-const agent = createReactAgent({ llm, tools });
+// Any LangChain chat model works
+const agent = createReactAgent({ llm: new ChatAnthropic({ model: 'claude-sonnet-5-5' }), tools });
 ```
+
+`CashmereBridgeTool` sends as soon as the agent calls it. Its description tells the model to confirm with the user
+first, but put a human approval step in front of it too (LangGraph supports interrupts), or give the agent only
+`CashmereSimulateTool`.
 
 ### crewAI
 
-crewAI uses LangChain tools natively -- same `CashmereBridgeTool` and `CashmereSimulateTool` classes work directly.
+crewAI is a Python framework, so the TypeScript classes above don't apply. Connect it to the [MCP server](#mcp-server)
+through crewAI's MCP support, or define its tools from the JSON schemas (`bridgeToolSchema`, `simulateToolSchema`,
+`supportedRoutesToolSchema`).
 
 ### Hermes (Nous Research)
 
 Hermes models take tools as OpenAI-style functions inside `<tools>` in the system prompt and answer with
 `<tool_call>{"name": ..., "arguments": ...}</tool_call>` blocks. Behind an OpenAI-compatible server with a Hermes tool
-parser (vLLM `--tool-call-parser hermes`, SGLang, llama.cpp, Ollama), pass `hermesTools()` as `tools` and read
-`tool_calls` as with OpenAI. Hermes Agent can use the [MCP server](#mcp-server) instead. To prompt a Hermes model
-directly, without a chat template:
+parser (vLLM `--enable-auto-tool-choice --tool-call-parser hermes`, SGLang, llama.cpp, Ollama), pass `hermesTools()` as
+`tools`, read `tool_calls` as with OpenAI, and send each result back as a `tool` message with its `tool_call_id`.
+Hermes Agent can use the [MCP server](#mcp-server) instead. To prompt a Hermes model directly, without a chat template:
 
 ```typescript
 import {
@@ -370,6 +394,8 @@ import {
 
 const cctp = new CashmereCCTP({ evm: { privateKey: process.env.EVM_PRIVATE_KEY! } });
 const system = hermesSystemPrompt(hermesTools(), 'You move USDC between chains for the user.');
+// Hermes 2 Pro and 3 read tool results as a `tool` message, Hermes 4 as a `user` message
+const toolResultRole = 'user'; // Hermes 4
 
 // After each model reply. Tool calls inside <think> are skipped.
 for (const call of parseHermesToolCalls(reply)) {
@@ -378,8 +404,7 @@ for (const call of parseHermesToolCalls(reply)) {
   if (call.name === 'cashmere_simulate') result = await cctp.simulate(args);
   else if (call.name === 'cashmere_supported_routes') result = getSupportedRoutes(args);
   else if (call.name === 'cashmere_bridge') result = await confirmWithUserThenTransfer(args); // your own approval step
-  // Hermes 2 Pro and 3 read tool results as a `tool` message, Hermes 4 as a `user` message
-  messages.push({ role: 'tool', content: hermesToolResponse(call.name, result) });
+  messages.push({ role: toolResultRole, content: hermesToolResponse(call.name, result) });
 }
 ```
 
