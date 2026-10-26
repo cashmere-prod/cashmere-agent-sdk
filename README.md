@@ -250,6 +250,10 @@ The server reads its keys from the environment only, as the MCP client config pa
 | `EVM_RPC_URL`, `SOLANA_RPC_URL`, `APTOS_RPC_URL`, `SUI_RPC_URL` | Custom RPCs. `EVM_RPC_URL` serves every EVM source chain, so set it only for a single-chain setup. `SUI_RPC_URL` is a gRPC endpoint |
 | `GAS_API_URL` | Gas API, default `https://gas.cashmere.exchange` |
 
+Paste each key as the wallet exports it: hex for EVM wallets such as MetaMask; base58 for Phantom or Solflare, or
+`solana-keygen`'s JSON array; hex or `ed25519-priv-0x...` for Aptos wallets such as Petra; `suiprivkey1...` for
+Slush or Sui Wallet, or hex.
+
 Give the agent a dedicated wallet that holds only what it may spend, plus gas.
 
 ### Claude Desktop

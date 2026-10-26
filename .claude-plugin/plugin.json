@@ -39,25 +39,25 @@
     "evm_private_key": {
       "type": "string",
       "title": "EVM private key",
-      "description": "Hex key of the wallet that sends from EVM chains. Leave empty to skip",
+      "description": "Hex key of the wallet that sends from EVM chains, as MetaMask exports it. Leave empty to skip",
       "sensitive": true
     },
     "solana_private_key": {
       "type": "string",
       "title": "Solana private key",
-      "description": "Base58, hex or JSON-array key of the wallet that sends from Solana. Leave empty to skip",
+      "description": "Base58 key (Phantom, Solflare), JSON array or hex of the wallet that sends from Solana. Leave empty to skip",
       "sensitive": true
     },
     "aptos_private_key": {
       "type": "string",
       "title": "Aptos private key",
-      "description": "Hex key of the wallet that sends from Aptos. Leave empty to skip",
+      "description": "Hex or ed25519-priv-0x... key (Petra) of the wallet that sends from Aptos. Leave empty to skip",
       "sensitive": true
     },
     "sui_private_key": {
       "type": "string",
       "title": "Sui private key",
-      "description": "Hex key of the wallet that sends from Sui. Leave empty to skip",
+      "description": "suiprivkey1... key (Slush, Sui Wallet) or hex of the wallet that sends from Sui. Leave empty to skip",
       "sensitive": true
     }
   }
