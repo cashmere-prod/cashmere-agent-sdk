@@ -1,6 +1,6 @@
 {
   "name": "@cashmerelabs/cashmere-agent-sdk",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Cashmere CCTP cross-chain USDC transfer SDK for EVM, Solana, Aptos, and Sui",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -61,5 +61,10 @@
   "engines": {
     "node": ">=22"
   },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cashmere-prod/cashmere-agent-sdk.git"
+  },
+  "homepage": "https://github.com/cashmere-prod/cashmere-agent-sdk#readme",
   "license": "MIT"
 }

@@ -4,12 +4,12 @@
     "name": "Cashmere Labs",
     "url": "https://cashmere.exchange"
   },
-  "description": "Cashmere Labs plugins: cross-chain USDC payments and transfers",
+  "description": "Cashmere Labs plugins: cross-chain USDC payments and transfers, and Goat LP liquidity",
   "plugins": [
     {
       "name": "cashmere",
       "source": "./",
-      "description": "Cross-chain USDC payments and transfers over Cashmere CCTP: MCP server and skill",
+      "description": "Cross-chain USDC payments and transfers over Cashmere CCTP, and Goat LP liquidity on Robinhood Chain: MCP server and skills",
       "category": "payments"
     }
   ]

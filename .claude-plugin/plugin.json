@@ -24,7 +24,7 @@
       "command": "npx",
       "args": [
         "-y",
-        "@cashmerelabs/cashmere-agent-sdk@0.3.0"
+        "@cashmerelabs/cashmere-agent-sdk@0.4.0"
       ],
       "env": {
         "CASHMERE_EVM_PRIVATE_KEY": "${user_config.evm_private_key}",
@@ -46,7 +46,7 @@
     "read_only": {
       "type": "boolean",
       "title": "Read-only",
-      "description": "Quotes and routes only: cashmere_bridge stays off and the keys below are not read",
+      "description": "Read tools only: cashmere_bridge and the Goat LP write tools stay off, and the keys below are not read",
       "default": false
     },
     "max_amount": {

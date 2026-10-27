@@ -15,12 +15,13 @@ its dependencies need Node 22. Sui fullnodes no longer serve JSON-RPC, so the Su
 ## AI Agent / OpenClaw Integration
 
 To give Claude Desktop, Claude Code, Hermes Agent or any other MCP client the transfer tools directly, run the
-bundled [MCP server](#mcp-server) and add the [agent skill](#agent-skill) for payments and transfers.
+bundled [MCP server](#mcp-server) and add the [agent skills](#agent-skill) for payments, transfers and Goat LP.
 
-Two files are written for agents, and both ship in the npm package:
+Three files are written for agents, and all ship in the npm package:
 
 - [`skills/cashmere-usdc-transfers/SKILL.md`](skills/cashmere-usdc-transfers/SKILL.md) is the [agent skill](#agent-skill)
   for sending payments and transfers with the MCP tools.
+- [`skills/goat-lp/SKILL.md`](skills/goat-lp/SKILL.md) is the agent skill for Goat LP pools, positions and automations.
 - `SKILL.md` at the package root is a developer reference for building transactions against the Cashmere contracts
   directly: addresses, ABIs, the Gas API and the routing rules. It is not an Agent Skills skill. Agents (Cursor, Codex,
   OpenClaw, LangChain, etc.) can read it at `node_modules/@cashmerelabs/cashmere-agent-sdk/SKILL.md`.
@@ -223,7 +224,7 @@ The package includes an MCP server, so Claude Desktop, Claude Code, Hermes Agent
 send transfers as tools. It runs over stdio and needs Node.js 22 or later:
 
 ```bash
-npx -y @cashmerelabs/cashmere-agent-sdk@0.3.0
+npx -y @cashmerelabs/cashmere-agent-sdk@0.4.0
 ```
 
 Pin the version as here: the process holds your keys, so it should run exactly the release you chose.
@@ -259,8 +260,8 @@ wallet the agent can spend from.
 
 | Variable | Effect |
 |----------|--------|
-| `CASHMERE_EVM_PRIVATE_KEY`, `CASHMERE_SOLANA_PRIVATE_KEY`, `CASHMERE_APTOS_PRIVATE_KEY`, `CASHMERE_SUI_PRIVATE_KEY` | Wallets `cashmere_bridge` sends from. Set only the chains you need |
-| `CASHMERE_MCP_READ_ONLY=1` | Simulate and routes only: `cashmere_bridge` is off and the keys are not read |
+| `CASHMERE_EVM_PRIVATE_KEY`, `CASHMERE_SOLANA_PRIVATE_KEY`, `CASHMERE_APTOS_PRIVATE_KEY`, `CASHMERE_SUI_PRIVATE_KEY` | Wallets `cashmere_bridge` sends from. The EVM one is also the wallet of the Goat LP write tools. Set only the chains you need |
+| `CASHMERE_MCP_READ_ONLY=1` | Read tools only: `cashmere_bridge` and the Goat LP write tools are off, and the keys are not read |
 | `CASHMERE_MCP_MAX_AMOUNT=500` | Largest USDC amount per transfer |
 | `CASHMERE_MCP_MAX_TOTAL=2000` | Largest USDC total while the server runs |
 | `CASHMERE_MCP_ALLOWED_RECIPIENTS=0x...,9WzD...` | The only recipients `cashmere_bridge` sends to, comma-separated |
@@ -284,7 +285,7 @@ on macOS, `%APPDATA%\Claude\` on Windows) and restart Claude Desktop:
   "mcpServers": {
     "cashmere": {
       "command": "npx",
-      "args": ["-y", "@cashmerelabs/cashmere-agent-sdk@0.3.0"],
+      "args": ["-y", "@cashmerelabs/cashmere-agent-sdk@0.4.0"],
       "env": {
         "CASHMERE_EVM_PRIVATE_KEY": "0x...",
         "CASHMERE_MCP_MAX_AMOUNT": "500",
@@ -311,7 +312,7 @@ On Claude Code before 2.1.275, run `/plugin marketplace add cashmere-prod/cashme
 `/plugin install cashmere@cashmere`. To add only the server:
 
 ```bash
-claude mcp add --env CASHMERE_MCP_READ_ONLY=1 --env npm_config_ignore_scripts=true --transport stdio cashmere -- npx -y @cashmerelabs/cashmere-agent-sdk@0.3.0
+claude mcp add --env CASHMERE_MCP_READ_ONLY=1 --env npm_config_ignore_scripts=true --transport stdio cashmere -- npx -y @cashmerelabs/cashmere-agent-sdk@0.4.0
 ```
 
 ### Hermes Agent
@@ -323,7 +324,7 @@ a small fixed baseline, not your shell environment, and names the tools `mcp_cas
 mcp_servers:
   cashmere:
     command: "npx"
-    args: ["-y", "@cashmerelabs/cashmere-agent-sdk@0.3.0"]
+    args: ["-y", "@cashmerelabs/cashmere-agent-sdk@0.4.0"]
     env:
       CASHMERE_EVM_PRIVATE_KEY: "0x..."
       CASHMERE_MCP_MAX_AMOUNT: "500"
@@ -341,7 +342,7 @@ Run `npm install && npm run build`, then point the client at the built file inst
 
 The MCP server also has tools for [Goat LP](https://docs.cashmere.exchange/goat-lp/overview), Uniswap v3 and v4
 liquidity on Robinhood Chain (chain 4663): pools, positions, adding liquidity, and the auto-compound, auto-range and
-auto-exit automations. They ship in the release after 0.3.0.
+auto-exit automations. They are in 0.4.0 and later.
 
 | Tool | What it does |
 |------|--------------|

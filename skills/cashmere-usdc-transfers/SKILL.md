@@ -2,7 +2,7 @@
 name: cashmere-usdc-transfers
 description: Send, pay or move USDC across chains with Cashmere CCTP (Circle CCTP V2) between Ethereum, Base, Arbitrum, Optimism, Polygon, Avalanche, Unichain, Linea, World Chain, Sei, Sonic, HyperEVM, Monad, Arc, Solana, Aptos and Sui. Use when the user wants to pay someone in USDC on another chain, transfer or bridge USDC between chains, move stablecoin treasury from one chain to another, or compare cross-chain USDC fees, routes and arrival times. Works through the Cashmere MCP tools cashmere_simulate, cashmere_supported_routes and cashmere_bridge.
 license: MIT
-compatibility: Needs the Cashmere MCP server (npx -y @cashmerelabs/cashmere-agent-sdk@0.3.0, Node.js 22+) connected to the agent, and network access.
+compatibility: Needs the Cashmere MCP server (npx -y @cashmerelabs/cashmere-agent-sdk@0.4.0, Node.js 22+) connected to the agent, and network access.
 ---
 
 # Cashmere USDC transfers
