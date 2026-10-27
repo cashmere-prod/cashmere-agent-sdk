@@ -2,7 +2,7 @@
 name: goat-lp
 description: Look up and manage Goat LP liquidity on Robinhood Chain (Uniswap v3 and v4, chain 4663) with the Cashmere MCP tools. Use when the user asks about Goat LP pools, APR, TVL or volume, their liquidity positions and fees, wants to add liquidity, or wants to turn auto-compound, auto-range or auto-exit on, change it or stop it. Works through goatlp_pools, goatlp_pool, goatlp_positions, goatlp_position, goatlp_add_liquidity, goatlp_set_auto_compound, goatlp_set_auto_range, goatlp_set_auto_exit and goatlp_stop_automation.
 license: MIT
-compatibility: Needs the Cashmere MCP server (@cashmerelabs/cashmere-agent-sdk, the release after 0.3.0, Node.js 22+) connected to the agent, and network access. The write tools need CASHMERE_EVM_PRIVATE_KEY in the server's configuration.
+compatibility: Needs the Cashmere MCP server (npx -y @cashmerelabs/cashmere-agent-sdk@0.4.0, Node.js 22+) connected to the agent, and network access. The write tools need CASHMERE_EVM_PRIVATE_KEY in the server's configuration.
 ---
 
 # Goat LP

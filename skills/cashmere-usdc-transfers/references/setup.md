@@ -1,7 +1,7 @@
 # Connecting the Cashmere MCP server
 
 The server ships in the `@cashmerelabs/cashmere-agent-sdk` npm package and runs over stdio with
-`npx -y @cashmerelabs/cashmere-agent-sdk@0.3.0`. It needs Node.js 22 or later. Keep the version pinned: the process
+`npx -y @cashmerelabs/cashmere-agent-sdk@0.4.0`. It needs Node.js 22 or later. Keep the version pinned: the process
 holds the keys.
 
 ## Claude Code
@@ -17,7 +17,7 @@ On Claude Code before 2.1.275, run `/plugin marketplace add cashmere-prod/cashme
 keychain. Or add only the server:
 
 ```bash
-claude mcp add --env CASHMERE_MCP_READ_ONLY=1 --env npm_config_ignore_scripts=true --transport stdio cashmere -- npx -y @cashmerelabs/cashmere-agent-sdk@0.3.0
+claude mcp add --env CASHMERE_MCP_READ_ONLY=1 --env npm_config_ignore_scripts=true --transport stdio cashmere -- npx -y @cashmerelabs/cashmere-agent-sdk@0.4.0
 ```
 
 ## Claude Desktop
@@ -29,7 +29,7 @@ Add the server to `claude_desktop_config.json` (Settings → Developer → Edit 
   "mcpServers": {
     "cashmere": {
       "command": "npx",
-      "args": ["-y", "@cashmerelabs/cashmere-agent-sdk@0.3.0"],
+      "args": ["-y", "@cashmerelabs/cashmere-agent-sdk@0.4.0"],
       "env": { "CASHMERE_EVM_PRIVATE_KEY": "0x...", "npm_config_ignore_scripts": "true" }
     }
   }
@@ -48,7 +48,7 @@ and so on:
 mcp_servers:
   cashmere:
     command: "npx"
-    args: ["-y", "@cashmerelabs/cashmere-agent-sdk@0.3.0"]
+    args: ["-y", "@cashmerelabs/cashmere-agent-sdk@0.4.0"]
     env:
       CASHMERE_EVM_PRIVATE_KEY: "0x..."
       npm_config_ignore_scripts: "true"
