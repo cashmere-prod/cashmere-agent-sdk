@@ -317,7 +317,7 @@ claude mcp add --env CASHMERE_MCP_READ_ONLY=1 --env npm_config_ignore_scripts=tr
 ### Hermes Agent
 
 Add the server under `mcp_servers` in `~/.hermes/config.yaml`. Hermes passes a stdio server the `env` listed here plus
-a small safe baseline, not your shell environment, and names the tools `mcp_cashmere_cashmere_simulate` and so on:
+a small fixed baseline, not your shell environment, and names the tools `mcp_cashmere_cashmere_simulate` and so on:
 
 ```yaml
 mcp_servers:
@@ -335,6 +335,73 @@ mcp_servers:
 Run `npm install && npm run build`, then point the client at the built file instead of `npx`:
 `"command": "node", "args": ["/path/to/cashmere-agent-sdk/dist/mcp/cli.js"]`.
 
+## Goat LP tools (Robinhood Chain)
+
+> Goat LP is experimental. Use small amounts.
+
+The MCP server also has tools for [Goat LP](https://docs.cashmere.exchange/goat-lp/overview), Uniswap v3 and v4
+liquidity on Robinhood Chain (chain 4663): pools, positions, adding liquidity, and the auto-compound, auto-range and
+auto-exit automations. They ship in the release after 0.3.0.
+
+| Tool | What it does |
+|------|--------------|
+| `goatlp_pools` | Pools with APR, fee APR, TVL, 24 h volume, fee tier and venue, and which automations each pool offers. Read-only |
+| `goatlp_pool` | One pool: the price both ways, ranges with their ticks, the APR breakdown, its hook, and why an automation is or is not offered. Read-only |
+| `goatlp_positions` | An owner's positions (default: the configured wallet) with value, uncollected fees, APR and PnL, and each automation's state. Read-only |
+| `goatlp_position` | One position with its cash flows, its permission and every automation rule, read on chain. Read-only |
+| `goatlp_add_liquidity` | Opens a v3 or v4 position, or adds to one the wallet owns, with the token amounts as given and no swap |
+| `goatlp_set_auto_compound`, `goatlp_set_auto_range`, `goatlp_set_auto_exit` | Turns an automation on, or changes it, for one position the wallet owns |
+| `goatlp_stop_automation` | Stops an automation as the Goat LP app does, and cancels its unused signed messages |
+
+The read tools are always on. The write tools are listed only when `CASHMERE_EVM_PRIVATE_KEY` is set and
+`CASHMERE_MCP_READ_ONLY` is not. They are annotated as destructive, so Claude Code always asks for the user's own
+approval, and they share `cashmere_bridge`'s queue: one write at a time from the wallet.
+
+### Plan, then execute
+
+Called without `execute`, a write tool sends nothing. It returns a plan and a `planId`: every transaction and signed
+message in order, with contract names and addresses, amounts or settings, fees, and the result of simulating it. The
+server instructions tell the agent to show the plan to the user and to wait for an explicit yes. Only then does it
+call the same tool with the same inputs plus `execute: true` and the `planId`. A plan is single use and lasts 10
+minutes. At execute the tool builds the plan again from fresh chain reads and sends nothing if it has changed.
+
+### What the tools check
+
+- The RPC is on Robinhood Chain (4663), checked again before anything is signed.
+- Every contract the tools send to, or give a permission to, matches the code hash pinned in this package. None of the
+  Goat LP contracts is upgradeable, and their source is published on the explorer ([robin.etherscan.io](https://robin.etherscan.io)).
+- Each transaction is decoded and simulated (`eth_call`) right before it is signed. A revert refuses it.
+- A signed message (v4 auto-compound) is decoded and checked before signing: only a `Permit` for `GoatAutoCompoundV4`,
+  for a position the wallet owns, within the app's run and deadline limits.
+- Never a permission for all positions, never an unlimited token or Permit2 allowance, never a transfer of a position,
+  never an output to anyone but the wallet, and never an owner, guardian or keeper function. Another app's approval is
+  left alone.
+- Automations only where the app offers them: the pair registry and pair table, the reviewed hooks with their pinned
+  code hashes, the keeper's size limit per pair, and the switches the API serves. A refusal gives the app's reason.
+- Deposits: pools of the Uniswap v3 factory, or v4 pools without a hook; no token that copies an official stock ticker
+  or takes a fee when it moves; the pool price within 5% of Chainlink where both tokens have a feed; balances that
+  cover it. No swaps, zaps or aggregator routes.
+- Errors never contain a private key or the RPC URL.
+
+Fees: auto-compound takes 10% of the fees it adds back, and Cashmere pays the gas. Auto-range takes 0.15% of the amount
+moved per move, and auto-exit 0.15% once. On v4, auto-compound needs no permission on the position: the wallet signs one
+message per run (no gas), at most 30 at a time and for at most 90 days, and the tool hands them to the keeper store at
+`api.cashmere.exchange`.
+
+The tools read `api.cashmere.exchange` as a polite client: they send `User-Agent: cashmere-agent-sdk/<version>`, keep
+answers for their cache lifetime, ask one request at a time per route group, stay under the per-minute limits, and wait
+once on a 429.
+
+| Variable | Effect |
+|----------|--------|
+| `CASHMERE_ROBINHOOD_RPC_URL` | Robinhood Chain RPC, https only (or a local node), never shown in errors. Default `https://rpc.mainnet.chain.robinhood.com` |
+| `CASHMERE_GOATLP_MAX_DEPOSIT_USD=100` | Largest USD value of one `goatlp_add_liquidity` call |
+| `CASHMERE_GOATLP_MAX_TOTAL_USD=500` | Largest USD value `goatlp_add_liquidity` deposits while the server runs |
+
+Both limits value a deposit with the API's token prices and refuse it when a price is missing. The write tools sign with
+`CASHMERE_EVM_PRIVATE_KEY`, on its own wallet: give the agent a dedicated one that holds only what it may deposit,
+plus a little ETH for gas.
+
 ## Agent Skill
 
 [`skills/cashmere-usdc-transfers`](skills/cashmere-usdc-transfers/SKILL.md) teaches an agent to run USDC payments and
@@ -349,6 +416,9 @@ skills can use it:
 | Claude Desktop | Zip the `skills/cashmere-usdc-transfers` folder and upload it with **Upload skill** under Customize → Skills (code execution must be on). The skill drives the local MCP server, so use it in Claude Desktop, not claude.ai in a browser |
 | Hermes Agent | `hermes skills install cashmere-prod/cashmere-agent-sdk/skills/cashmere-usdc-transfers` |
 | Others | Copy the folder into the agent's skills directory, such as `~/.claude/skills/`. It also ships in the npm package |
+
+[`skills/goat-lp`](skills/goat-lp/SKILL.md) does the same for the Goat LP tools: it finds pools and positions, plans a
+deposit or an automation, shows the plan, and executes it only after the user confirms. Install it the same way.
 
 ## Agent Framework Integration
 
@@ -447,6 +517,8 @@ check as the MCP server.
 - Never stored, logged, or transmitted anywhere except to the chain RPC
 - The Gas API (`gas.cashmere.exchange`) only receives domain/fee parameters, never keys
 - The MCP server reads keys from its environment only, never logs them, and redacts them from tool errors
+- The Goat LP write tools sign only what a plan the user saw contains, after decoding and simulating it, and refuse a
+  contract whose code differs from the hash pinned in this package
 - All contract addresses are public on-chain data
 
 ## Build

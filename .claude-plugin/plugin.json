@@ -1,7 +1,7 @@
 {
   "name": "cashmere",
   "displayName": "Cashmere USDC transfers",
-  "description": "Cross-chain USDC payments and transfers over Cashmere CCTP: an MCP server that quotes, lists routes and sends, and a skill that runs transfers with the user's confirmation",
+  "description": "Cross-chain USDC payments and transfers over Cashmere CCTP, and Goat LP liquidity on Robinhood Chain: an MCP server that quotes, lists routes and sends, with skills that run each action with the user's confirmation",
   "author": {
     "name": "Cashmere Labs",
     "url": "https://cashmere.exchange"
@@ -15,7 +15,9 @@
     "payments",
     "cctp",
     "cross-chain",
-    "bridge"
+    "bridge",
+    "liquidity",
+    "uniswap"
   ],
   "mcpServers": {
     "cashmere": {
@@ -33,6 +35,9 @@
         "CASHMERE_MCP_MAX_AMOUNT": "${user_config.max_amount}",
         "CASHMERE_MCP_MAX_TOTAL": "${user_config.max_total}",
         "CASHMERE_MCP_ALLOWED_RECIPIENTS": "${user_config.allowed_recipients}",
+        "CASHMERE_ROBINHOOD_RPC_URL": "${user_config.robinhood_rpc_url}",
+        "CASHMERE_GOATLP_MAX_DEPOSIT_USD": "${user_config.goatlp_max_deposit_usd}",
+        "CASHMERE_GOATLP_MAX_TOTAL_USD": "${user_config.goatlp_max_total_usd}",
         "npm_config_ignore_scripts": "true"
       }
     }
@@ -58,6 +63,22 @@
       "type": "string",
       "title": "Allowed recipients",
       "description": "Comma-separated addresses cashmere_bridge may send to. Leave empty to allow any recipient"
+    },
+    "goatlp_max_deposit_usd": {
+      "type": "string",
+      "title": "Goat LP: largest deposit (USD)",
+      "description": "goatlp_add_liquidity refuses deposits worth more than this, such as 100. Leave empty for no limit"
+    },
+    "goatlp_max_total_usd": {
+      "type": "string",
+      "title": "Goat LP: largest total (USD)",
+      "description": "goatlp_add_liquidity stops once it has deposited this much in one session, such as 500. Leave empty for no limit"
+    },
+    "robinhood_rpc_url": {
+      "type": "string",
+      "title": "Robinhood Chain RPC",
+      "description": "https RPC for the Goat LP tools. Leave empty for the public endpoint",
+      "sensitive": true
     },
     "evm_private_key": {
       "type": "string",

@@ -17,8 +17,12 @@ through the Cashmere contracts, on 14 EVM chains, Solana, Aptos and Sui. It sign
 - `src/tool-schema.ts`: tool names, descriptions and schemas, shared by the MCP server, the OpenAI and Hermes exports
   and LangChain.
 - `src/mcp/`: the stdio MCP server. `cli.ts` is the `cashmere-mcp` bin.
+- `src/goatlp/`: the Goat LP tools of the MCP server (Robinhood Chain): the API client, the chain reads and code-hash
+  pins, the builders and decode checks, the plan / execute flow and the tool registration. Tests run on a fake chain
+  and fake API answers in `src/goatlp/__fixtures__/`.
 - `src/tools/`: the LangChain and Hermes integrations.
 - `skills/cashmere-usdc-transfers/`: the agent skill (Agent Skills format) for running payments with the MCP tools.
+- `skills/goat-lp/`: the agent skill for the Goat LP tools.
 - `.claude-plugin/`: Claude Code plugin and marketplace manifests. The repository root is the plugin.
 - `SKILL.md`: developer reference for the contracts, shipped in the npm package. Not an Agent Skills skill.
 
@@ -33,6 +37,7 @@ through the Cashmere contracts, on 14 EVM chains, Solana, Aptos and Sui. It sign
 
 - Never send a real transfer from a test or script. Tests reach `cashmere_bridge` and `transfer()` only with stubs, or
   with throwaway keys and unreachable hosts.
+- The same for Goat LP: tests never send a transaction, sign with a real key or write to `api.cashmere.exchange`.
 - Never print, log or commit a private key, error messages included. The MCP server redacts configured keys from tool
   errors: keep it that way.
 - The MCP server's stdout carries JSON-RPC. Log to stderr only.
