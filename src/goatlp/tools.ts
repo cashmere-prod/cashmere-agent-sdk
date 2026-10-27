@@ -3,7 +3,9 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
+import { planSetAutomation, planStop, type SetAutomationInput } from './automation';
 import type { GoatLpContext } from './context';
+import { PlanStore, executeSteps, fingerprintOf, inputKeyOf, planSimulation, type BuiltPlan } from './plans';
 import { poolTool, poolsTool, positionTool, positionsTool } from './read';
 
 export const GOATLP_READ_TOOLS = ['goatlp_pools', 'goatlp_pool', 'goatlp_positions', 'goatlp_position'] as const;
@@ -89,3 +91,162 @@ export function registerGoatLpReadTools(server: McpServer, ctx: GoatLpContext, r
     annotations: ro,
   }, (input) => run(() => positionTool(ctx, input)));
 }
+
+// ------------------------------------------------------------------ write tools
+
+export const GOATLP_WRITE_TOOLS = ['goatlp_set_auto_range', 'goatlp_set_auto_exit', 'goatlp_set_auto_compound', 'goatlp_stop_automation'] as const;
+
+const TWO_STEP = 'Two steps: without execute it returns a plan (every transaction and signature in order, with contracts, addresses, '
+  + 'settings, fees and the simulation result) and a planId, and sends nothing. Show the plan to the user; only after the user confirms it, '
+  + 'call again with the same inputs plus execute: true and that planId (single use, valid 10 minutes). Never execute a plan the user has not seen.';
+
+const writeMeta = {
+  annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
+  // Claude Code then shows its full permission prompt instead of a one-tap approval
+  _meta: { 'anthropic/requiresUserInteraction': true },
+} as const;
+
+const planFields = {
+  execute: z.boolean().optional().describe('Send the plan. Only with the planId of a plan the user has seen and confirmed'),
+  planId: z.string().regex(/^[0-9a-f]{24}$/, 'the planId a plan returned').optional().describe('The planId of the confirmed plan (with execute: true)'),
+};
+const bps = (min: number, max: number, what: string) => z.number().int().min(min).max(max).describe(what);
+
+/** The server's single write queue: one transaction flow at a time from the wallet */
+export type Serial = (work: () => Promise<CallToolResult>) => Promise<CallToolResult>;
+
+export function registerGoatLpWriteTools(server: McpServer, ctx: GoatLpContext, redact: Redactor, serial: Serial): void {
+  const run = goatRun(redact);
+  const store = new PlanStore(ctx.now);
+
+  const flow = <I extends { execute?: boolean; planId?: string }>(tool: string, build: (input: I, nowSec: number) => Promise<BuiltPlan>) =>
+    (input: I, extra: { signal: AbortSignal }): Promise<CallToolResult> => {
+      const signer = ctx.signer;
+      if (!input.execute) {
+        return run(async () => {
+          if (!signer) throw new Error('Not planned: this server has no wallet configured.');
+          const nowSec = ctx.nowSec();
+          const plan = await build(input, nowSec);
+          await planSimulation(ctx.chain, signer.address, plan.steps);
+          const rec = store.create(tool, inputKeyOf(input as Record<string, unknown>), nowSec, fingerprintOf(plan.steps));
+          const expiresAt = store.expiresAt(rec);
+          return {
+            planId: rec.id, expiresAt, wallet: signer.address, ...plan.view,
+            steps: plan.steps.map((s, i) => ({ step: i + 1, action: s.label, ...s.view })),
+            warning: GOATLP_WARNING,
+            next: `Nothing was sent. Show this plan to the user. Only after the user confirms it, call ${tool} again with the same inputs plus execute: true and planId "${rec.id}" (valid until ${expiresAt}).`,
+          };
+        });
+      }
+      return serial(() => run(async () => {
+        if (extra.signal.aborted) throw new Error('Not sent: the request was cancelled before the plan started.');
+        if (!signer) throw new Error('Not sent: this server has no wallet configured.');
+        if (!input.planId) throw new Error('Not sent: execute: true needs the planId of the plan the user confirmed. Call without execute first.');
+        const rec = store.take(input.planId, tool, inputKeyOf(input as Record<string, unknown>));
+        const plan = await build(input, rec.nowSec);
+        if (fingerprintOf(plan.steps) !== rec.fingerprint) {
+          throw new Error('Not sent: the plan is no longer the same as the one shown (the chain changed since, such as a price, a permission or a signed-message slot). Call without execute for a new plan and show it to the user.');
+        }
+        const steps = await executeSteps(ctx.chain, signer, plan.steps, extra.signal);
+        const now = plan.readBack ? await plan.readBack().catch(() => undefined) : undefined;
+        return { executed: true, planId: rec.id, steps, ...(now ? { now } : {}) };
+      }));
+    };
+
+  const venue = z.enum(['v3', 'v4']).describe('Uniswap venue of the position: v3 or v4');
+  const id = positionId;
+
+  server.registerTool('goatlp_set_auto_range', {
+    title: 'Goat LP auto-range',
+    description: 'Turn on (or change) Goat LP auto-range for one Uniswap v3 or v4 position the configured wallet owns on Robinhood Chain: '
+      + "when the price leaves the range by the trigger distance, a keeper moves the position to a new range around the price. The fee is 0.15% "
+      + 'of the amount moved, per move. Defaults are the app\'s: the closest trigger the pair allows, 0.5% price protection, on v4 at most one '
+      + 'move every 6 hours and 20 moves per saved rule; on v3 each move makes a new position ID and the new width defaults to the current one. '
+      + `Permission: this position only (v3: AutoRange; v4: GoatV4StewardEngine). One automation per position. ${TWO_STEP}`,
+    inputSchema: {
+      venue, id,
+      triggerPct: z.number().positive().max(200).optional().describe('Move when the price is this many percent past the range (default: the closest the pair allows)'),
+      triggerTicks: z.number().int().min(1).max(20_000).optional().describe('The trigger distance in ticks instead of triggerPct'),
+      newWidthPctEachSide: z.number().positive().max(1000).optional().describe('v3 only: the new range, this many percent each side of the price (default: the current width)'),
+      newWidthTicks: z.number().int().positive().optional().describe('v3 only: the new range width in ticks instead of newWidthPctEachSide'),
+      maxPriceProtectionBps: bps(10, 100, 'Price protection of the swap inside a move, in bps (default 50 = 0.5%; the pair may allow less)').optional(),
+      minIntervalHours: z.number().min(1).max(720).optional().describe('v4 only: at most one move every N hours (default 6)'),
+      maxSwapFeePct: z.number().positive().max(10).optional().describe('v4 only: the highest pool fee the swap inside a move may pay, in percent (default 1)'),
+      ...planFields,
+    },
+    ...writeMeta,
+  }, flow('goatlp_set_auto_range', (i: SetToolInput, nowSec) => planSetAutomation(ctx, { ...i, kind: 'range' }, nowSec)));
+
+  const lowerIn = z.object({
+    tick: z.number().int().optional().describe('The exit level as a tick'),
+    pctBelowRange: z.number().positive().max(99).optional().describe('The exit level this many percent below the lower edge of the range (default 5)'),
+    swap: z.boolean().optional().describe('Swap everything to token1 at the exit (default false: withdraw only)'),
+  }).strict();
+  const upperIn = z.object({
+    tick: z.number().int().optional().describe('The exit level as a tick'),
+    pctAboveRange: z.number().positive().max(10_000).optional().describe('The exit level this many percent above the upper edge of the range (default 5)'),
+    swap: z.boolean().optional().describe('Swap everything to token0 at the exit (default false: withdraw only)'),
+  }).strict();
+
+  server.registerTool('goatlp_set_auto_exit', {
+    title: 'Goat LP auto-exit',
+    description: 'Turn on (or change) Goat LP auto-exit for one Uniswap v3 or v4 position the configured wallet owns on Robinhood Chain: when '
+      + 'the price reaches a level below or above the range, a keeper closes the position and everything goes to the owner (withdraw only, '
+      + 'or swap all to one token). Runs once, then turns itself off. The fee is 0.15%, once. Give at least one side; a side without a level '
+      + 'defaults to 5% beyond the range edge. Permission: this position only (v3: AutoExit; v4: GoatV4StewardEngine). One automation per '
+      + `position. ${TWO_STEP}`,
+    inputSchema: {
+      venue, id,
+      lower: lowerIn.optional().describe('Exit when the price falls to this level (below the range)'),
+      upper: upperIn.optional().describe('Exit when the price rises to this level (above the range)'),
+      maxPriceProtectionBps: bps(10, 100, 'Price protection of a swap exit, in bps (default 50 = 0.5%; the pair may allow less)').optional(),
+      maxSwapFeePct: z.number().positive().max(10).optional().describe('v4 only: the highest pool fee a swap exit may pay, in percent (default 1)'),
+      ...planFields,
+    },
+    ...writeMeta,
+  }, flow('goatlp_set_auto_exit', (i: ExitToolInput, nowSec) => planSetAutomation(ctx, {
+    ...i, kind: 'exit',
+    lower: i.lower ? { tick: i.lower.tick, pctBeyondRange: i.lower.pctBelowRange, swap: i.lower.swap } : undefined,
+    upper: i.upper ? { tick: i.upper.tick, pctBeyondRange: i.upper.pctAboveRange, swap: i.upper.swap } : undefined,
+  }, nowSec)));
+
+  server.registerTool('goatlp_set_auto_compound', {
+    title: 'Goat LP auto-compound',
+    description: 'Turn on (or change) Goat LP auto-compound for one Uniswap v3 or v4 position the configured wallet owns on Robinhood Chain: a '
+      + 'keeper collects the fees and adds them back to the position (or, on v4, sends them to the wallet). Goat LP takes 10% of the fees; '
+      + 'Cashmere pays the gas. v3: one permission for this position to GoatAutoCompoundV3. v4: no permission on the NFT; the wallet signs one '
+      + 'message per run (free, at most 30 per batch, valid at most 90 days; defaults 12 runs for 30 days, or 4 for 90 days under the minimum '
+      + 'size), and the signed messages are handed to the keeper store at api.cashmere.exchange. signMore: true signs another batch for a rule '
+      + `that is on. One automation per position. ${TWO_STEP}`,
+    inputSchema: {
+      venue, id,
+      maxPriceProtectionBps: bps(1, 2000, 'Price protection of the swap inside a compound, in bps (default 100 = 1%; v3 at most 500)').optional(),
+      minIntervalHours: z.number().min(1).max(720).optional().describe('At most one compound every N hours (default: 1 on v3; on v4 the signing period over the runs)'),
+      swapToMatch: z.boolean().optional().describe('v3 only: swap part of the fees so they fit the range (default true)'),
+      mode: z.enum(['addBack', 'claim']).optional().describe('v4 only: addBack puts the fees back in the position (default); claim sends them to the wallet'),
+      runsToSign: z.number().int().min(1).max(30).optional().describe('v4 only: how many runs to sign now (default 12, or 4 for a small position)'),
+      horizonDays: z.number().int().min(1).max(90).optional().describe('v4 only: how many days the signed runs last (default 30, or 90 for a small position)'),
+      signMore: z.boolean().optional().describe('v4 only: sign and hand over another batch for the rule that is on, without changing it'),
+      ...planFields,
+    },
+    ...writeMeta,
+  }, flow('goatlp_set_auto_compound', (i: SetToolInput, nowSec) => planSetAutomation(ctx, { ...i, kind: 'compound' }, nowSec)));
+
+  server.registerTool('goatlp_stop_automation', {
+    title: 'Stop a Goat LP automation',
+    description: 'Stop auto-compound, auto-range or auto-exit on one position the configured wallet owns on Robinhood Chain, as the app does: '
+      + 'v3: the rule off, then this automation\'s permission removed; v4 auto-range / auto-exit: the rule cleared, then its permission removed; '
+      + 'v4 auto-compound: the rule off, then every signed and unused message cancelled on chain and any permission removed, then the keeper '
+      + `store asked to drop the messages. Another app's approval is never touched. The position itself stays as it is. ${TWO_STEP}`,
+    inputSchema: { venue, id, kind: z.enum(['compound', 'range', 'exit']).describe('The automation to stop'), ...planFields },
+    ...writeMeta,
+  }, flow<StopToolInput>('goatlp_stop_automation', (i) => planStop(ctx, i)));
+}
+
+type SetToolInput = Omit<SetAutomationInput, 'kind'> & { execute?: boolean; planId?: string };
+type StopToolInput = { venue: 'v3' | 'v4'; id: string; kind: 'compound' | 'range' | 'exit'; execute?: boolean; planId?: string };
+type ExitToolInput = Omit<SetAutomationInput, 'kind' | 'lower' | 'upper'> & {
+  lower?: { tick?: number; pctBelowRange?: number; swap?: boolean };
+  upper?: { tick?: number; pctAboveRange?: number; swap?: boolean };
+  execute?: boolean; planId?: string;
+};

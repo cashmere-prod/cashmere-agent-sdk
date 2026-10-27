@@ -15,7 +15,7 @@ import {
 import { getSupportedRoutes } from '../utils/supported-routes';
 import { recipientError } from '../utils/address';
 import { createGoatLpContext, type GoatLpDeps, type GoatLpSettings } from '../goatlp/context';
-import { GOATLP_WARNING, registerGoatLpReadTools } from '../goatlp/tools';
+import { GOATLP_WARNING, registerGoatLpReadTools, registerGoatLpWriteTools } from '../goatlp/tools';
 
 /** Goat LP settings of the MCP server, and replaceable parts for tests */
 export interface GoatLpServerOptions extends GoatLpSettings {
@@ -60,6 +60,11 @@ const { version } = JSON.parse(readFileSync(join(__dirname, '..', '..', 'package
 const GOATLP_INSTRUCTIONS = 'Goat LP (Uniswap v3 and v4 liquidity on Robinhood Chain, chain 4663): goatlp_pools, goatlp_pool, '
   + 'goatlp_positions and goatlp_position show pools with their APR, TVL and volume, positions, and the auto-compound, auto-range '
   + `and auto-exit rules; they are read-only. ${GOATLP_WARNING}`;
+const GOATLP_WRITE_INSTRUCTIONS = 'The Goat LP write tools (goatlp_set_auto_range, goatlp_set_auto_exit, goatlp_set_auto_compound, '
+  + 'goatlp_stop_automation) act from the configured wallet in two steps. Called without execute, a tool returns a plan and a planId and '
+  + 'sends nothing: show the user every step of the plan (contracts, addresses, settings, fees, signatures, simulation result) and ask '
+  + 'for an explicit yes. Only then call the same tool with the same inputs plus execute: true and the planId. A plan is single use and '
+  + 'expires after 10 minutes. Never execute a plan the user has not seen, and never retry a failed execute without asking the user.';
 
 const INSTRUCTIONS = 'Cashmere moves USDC between 17 chains (Ethereum, Base, Arbitrum, Optimism, Polygon, Avalanche, '
   + 'Unichain, Linea, Worldchain, Sei, Sonic, HyperEVM, Monad, Arc, Solana, Aptos, Sui) over Circle CCTP: cross-chain '
@@ -72,6 +77,11 @@ export function signerChains(config: CashmereCCTPConfig): string[] {
 
 export function bridgeEnabled({ config, readOnly }: CashmereMcpServerOptions): boolean {
   return !readOnly && signerChains(config).length > 0;
+}
+
+/** The Goat LP write tools sign with the EVM key on Robinhood Chain */
+export function goatlpWritesEnabled({ config, readOnly }: CashmereMcpServerOptions): boolean {
+  return !readOnly && !!config.evm;
 }
 
 // Endpoints that sign or carry transactions are reached over TLS; plain http is for a local node or mock.
@@ -206,7 +216,9 @@ export function createCashmereMcpServer(options: CashmereMcpServerOptions): McpS
         + 'confirms them. Never retry a failed transfer without asking the user.'
       : `${INSTRUCTIONS} This server cannot send transfers: cashmere_bridge is off because `
         + (readOnly ? 'CASHMERE_MCP_READ_ONLY is set.' : 'no signer private key is configured.'))
-      + ` ${GOATLP_INSTRUCTIONS}`,
+      + ` ${GOATLP_INSTRUCTIONS} `
+      + (goatlpWritesEnabled(options) ? GOATLP_WRITE_INSTRUCTIONS
+        : `The Goat LP write tools are off because ${readOnly ? 'CASHMERE_MCP_READ_ONLY is set' : 'no EVM private key is configured'}.`),
   });
 
   const run = async (call: () => unknown): Promise<CallToolResult> => {
@@ -218,7 +230,18 @@ export function createCashmereMcpServer(options: CashmereMcpServerOptions): McpS
     }
   };
 
-  registerGoatLpReadTools(server, goat, (text) => redact(text, config, goatSecrets));
+  const goatRedact = (text: string) => redact(text, config, goatSecrets);
+  registerGoatLpReadTools(server, goat, goatRedact);
+
+  // One write at a time, for cashmere_bridge and the Goat LP write tools alike: parallel calls from one wallet would race
+  // for its nonce. Every queued call resolves (errors become tool results), so the queue never rejects.
+  let queue: Promise<unknown> = Promise.resolve();
+  const serial = (work: () => Promise<CallToolResult>): Promise<CallToolResult> => {
+    const result = queue.then(work);
+    queue = result;
+    return result;
+  };
+  if (goatlpWritesEnabled(options)) registerGoatLpWriteTools(server, goat, goatRedact, serial);
 
   server.registerTool('cashmere_supported_routes', {
     title: 'Cashmere supported routes',
@@ -235,8 +258,6 @@ export function createCashmereMcpServer(options: CashmereMcpServerOptions): McpS
   }, params => run(() => cctp.simulate(params)));
 
   if (bridge) {
-    // One transfer at a time: parallel calls from one wallet would race for its nonce
-    let queue: Promise<unknown> = Promise.resolve();
     // USDC that left, or may have left, the wallet while the server runs
     let spent = 0n;
     const maxTotalRaw = maxTotal === undefined ? undefined : parseUnits(maxTotal, 6);
@@ -259,7 +280,7 @@ export function createCashmereMcpServer(options: CashmereMcpServerOptions): McpS
       // Claude Code then shows its full permission prompt instead of a one-tap approval
       _meta: { 'anthropic/requiresUserInteraction': true },
     }, ({ allowDuplicate, ...params }, extra) => {
-      const result = queue.then(() => run(async () => {
+      return serial(() => run(async () => {
         // A call the client cancelled or timed out while it waited in the queue never starts
         if (extra.signal.aborted) throw new Error('Not sent: the request was cancelled before the transfer started.');
         const problem = bridgeCheck(params, { maxAmount, allowedRecipients });
@@ -290,8 +311,6 @@ export function createCashmereMcpServer(options: CashmereMcpServerOptions): McpS
           throw err;
         }
       }));
-      queue = result;
-      return result;
     });
   }
 

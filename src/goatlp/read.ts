@@ -56,7 +56,7 @@ function feesText(c: ContractFacts | undefined, venue: Venue) {
   };
 }
 
-async function minUsdOf(api: GoatApi): Promise<number> {
+export async function minUsdOf(api: GoatApi): Promise<number> {
   try {
     const p = await api.get<ApiAutomationPolicy>(routes.automationPolicy(), 'other');
     const v = p?.keeper?.min_position_display_usd;

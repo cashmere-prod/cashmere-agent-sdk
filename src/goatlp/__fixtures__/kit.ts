@@ -11,6 +11,7 @@ import {
   GOAT_V4_COMPOUNDOR, GOAT_V4_PAIR_REGISTRY, GOAT_V4_STEWARD, GOAT_V4_STEWARD_ENGINE, NPM, PINS, POSM,
 } from '../constants';
 import type { FetchLike } from '../api';
+import { autoExitAbi as autoExitAbiK, autoRangeAbi as autoRangeAbiK, gac3Abi as gac3AbiK, gac4Abi as gac4AbiK, npmAbi as npmAbiK, posmAbi as posmAbiK, stewardAbi as stewardAbiK } from '../abis';
 import type { Spenders } from '../calldata';
 import { TARGETS } from '../facts';
 import type { GuardCtx } from '../guard';
@@ -204,8 +205,9 @@ const ST_OFF = { mode: 0, triggerTicks: 0, slippageBps: 0, minInterval: 0, budge
  * 1489972), their pools listed for automation with Chainlink prices, and every rule off. `owner` owns both positions.
  * The state is mutable: `apply` plays a sent transaction onto it, so the read-back after a write sees the change.
  */
-export function goatWorld(o: { owner?: Address } = {}) {
+export function goatWorld(o: { owner?: Address; v4Range?: [number, number] } = {}) {
   const owner = o.owner ?? API_OWNER;
+  const [v4Lower, v4Upper] = o.v4Range ?? [-198960, -198650];
   const chain = new FakeChain();
   const st: WorldState = {
     owner: new Map([[`v4:${V4_POS}`, owner], [`v3:${V3_POS}`, owner]]), approved: new Map(),
@@ -236,7 +238,7 @@ export function goatWorld(o: { owner?: Address } = {}) {
     .on(POSM, 'ownerOf', (a: readonly unknown[]) => st.owner.get(`v4:${id(a)}`) ?? notMinted())
     .on(POSM, 'getApproved', (a: readonly unknown[]) => st.approved.get(`v4:${id(a)}`) ?? ZERO)
     .on(POSM, 'getPoolAndPositionInfo', (a: readonly unknown[]) => (id(a) === V4_POS
-      ? [{ currency0: ZERO, currency1: USDG_T, fee: 8388608, tickSpacing: 10, hooks: REVIEWED_HOOK }, v4Info(-198960, -198650)] : notMinted()))
+      ? [{ currency0: ZERO, currency1: USDG_T, fee: 8388608, tickSpacing: 10, hooks: REVIEWED_HOOK }, v4Info(v4Lower, v4Upper)] : notMinted()))
     .on(POSM, 'getPositionLiquidity', (a: readonly unknown[]) => (id(a) === V4_POS ? 7629398407350629n : 0n))
     .on(POSM, 'nonces', (a: readonly unknown[]) => st.nonces.get(`${lc(a[0] as string)}:${String(a[1])}`) ?? 0n)
     .on(POSM, 'DOMAIN_SEPARATOR', '0x061938567e6832ca43b380ce1978347d2ab5aea073ca93cdf29074c9ebfa15dd')
@@ -275,4 +277,47 @@ export function apiWorld(extra: Record<string, FakeAnswer | ((init: { method: st
     [`/automation/permits/${V4_POS}`]: { body: { sessions: [] }, headers: { 'cache-control': 'no-store' } },
     ...extra,
   });
+}
+
+/** Play a sent transaction onto the world (approvals, rules, cancelled nonces), as the chain would */
+export function playTx(st: WorldState, from: Address, tx: { to: Address; data: Hex }): void {
+  const to = lc(tx.to);
+  const d = (abi: readonly unknown[]) => decodeFunctionData({ abi: abi as Abi, data: tx.data }) as { functionName: string; args: readonly unknown[] };
+  if (to === lc(POSM)) {
+    const c = d(posmAbiK);
+    const one = (fn: string, args: readonly unknown[]) => {
+      if (fn === 'approve') { const a = args[0] as Address; if (/^0x0{40}$/i.test(a)) st.approved.delete(`v4:${args[1]}`); else st.approved.set(`v4:${args[1]}`, a); }
+      if (fn === 'revokeNonce') { const n = args[0] as bigint; const k = `${lc(from)}:${n >> 8n}`; st.nonces.set(k, (st.nonces.get(k) ?? 0n) | (1n << (n & 255n))); }
+    };
+    if (c.functionName === 'multicall') for (const inner of c.args[0] as Hex[]) { const x = decodeFunctionData({ abi: posmAbiK as Abi, data: inner }) as { functionName: string; args: readonly unknown[] }; one(x.functionName, x.args); }
+    else one(c.functionName, c.args);
+  } else if (to === lc(NPM)) {
+    const c = d(npmAbiK);
+    if (c.functionName === 'approve') { const a = c.args[0] as Address; if (/^0x0{40}$/i.test(a)) st.approved.delete(`v3:${c.args[1]}`); else st.approved.set(`v3:${c.args[1]}`, a); }
+  } else if (to === lc(GOAT_AUTO_COMPOUND_V3)) {
+    const c = d(gac3AbiK); const id = c.args[0] as bigint; const g = c.args[1] as Record<string, unknown>;
+    st.gac3.set(id, [g.enabled, g.swapEnabled, g.maxSlippageBps, g.minInterval, 0, 0n, 0n]); st.gac3Owner.set(id, from);
+  } else if (to === lc(GOAT_AUTO_COMPOUND_V4)) {
+    const c = d(gac4AbiK); const id = c.args[0] as bigint; const g = c.args[1] as Record<string, unknown>;
+    st.gac4.set(id, [g.enabled, g.claimOnly, g.allowStandingApproval, g.maxSlippageBps, g.minInterval, 0, 0n]); st.gac4Owner.set(id, from);
+  } else if (to === lc(AUTO_RANGE_V3)) {
+    const c = d(autoRangeAbiK); const id = c.args[0] as bigint; const g = c.args[2] as Record<string, unknown>;
+    st.ar.set(id, [g.lowerTickLimit, g.upperTickLimit, g.lowerTickDelta, g.upperTickDelta, g.token0SlippageX64, g.token1SlippageX64, g.onlyFees, g.autoCompound, g.maxRewardX64]); st.arOwner.set(id, from);
+  } else if (to === lc(AUTO_EXIT_V3)) {
+    const c = d(autoExitAbiK); const id = c.args[0] as bigint; const g = c.args[1] as Record<string, unknown>;
+    st.ae.set(id, [g.isActive, g.token0Swap, g.token1Swap, g.token0TriggerTick, g.token1TriggerTick, g.token0SlippageX64, g.token1SlippageX64, g.onlyFees, g.maxRewardX64]); st.aeOwner.set(id, from);
+  } else if (to === lc(GOAT_V4_STEWARD)) {
+    const c = d(stewardAbiK); const id = c.args[0] as bigint;
+    if (c.functionName === 'clearConfig') st.steward.set(id, { ...ST_OFF });
+    else if (c.functionName === 'setRangeConfig') { const g = c.args[1] as Record<string, number>; st.steward.set(id, { ...ST_OFF, mode: 1, triggerTicks: g.triggerTicks, slippageBps: g.slippageBps, minInterval: g.minInterval, budget: g.budget, maxSwapFeePips: g.maxSwapFeePips, pairEpoch: 1 }); st.stewardOwner.set(id, from); }
+    else if (c.functionName === 'setExitConfig') { const g = c.args[1] as Record<string, number>; st.steward.set(id, { ...ST_OFF, mode: 2, flags: g.flags, lowerTrigger: g.lowerTrigger, upperTrigger: g.upperTrigger, slippageBps: g.slippageBps, maxSwapFeePips: g.maxSwapFeePips, pairEpoch: 1 }); st.stewardOwner.set(id, from); }
+  }
+}
+
+/** The world, owned by the test signer, with a signer whose transactions play onto it */
+export function writeWorld(o: { v4Range?: [number, number] } = {}) {
+  const w = goatWorld({ owner: TEST_ACCOUNT, v4Range: o.v4Range });
+  const signer = new FakeSigner();
+  signer.onSend = (tx) => playTx(w.st, signer.address, tx);
+  return { ...w, signer };
 }

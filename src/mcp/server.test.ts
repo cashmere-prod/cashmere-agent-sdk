@@ -41,6 +41,7 @@ function json(result: Awaited<ReturnType<Client['callTool']>>) {
 }
 
 const GOATLP_READ = ['goatlp_pool', 'goatlp_pools', 'goatlp_position', 'goatlp_positions'];
+const GOATLP_WRITE = ['goatlp_set_auto_compound', 'goatlp_set_auto_exit', 'goatlp_set_auto_range', 'goatlp_stop_automation'];
 
 async function toolNames(client: Client): Promise<string[]> {
   const { tools } = await client.listTools();
@@ -50,7 +51,7 @@ async function toolNames(client: Client): Promise<string[]> {
 test('with a signer the server lists simulate, routes and a confirm-first bridge', async () => {
   const client = await connect({ config: { evm: { privateKey: KEY }, sui: { privateKey: KEY } } });
   const { tools } = await client.listTools();
-  assert.deepEqual(tools.map(t => t.name).sort(), ['cashmere_bridge', 'cashmere_simulate', 'cashmere_supported_routes', ...GOATLP_READ]);
+  assert.deepEqual(tools.map(t => t.name).sort(), ['cashmere_bridge', 'cashmere_simulate', 'cashmere_supported_routes', ...GOATLP_READ, ...GOATLP_WRITE].sort());
 
   for (const name of ['cashmere_simulate', 'cashmere_supported_routes']) {
     assert.equal(tools.find(t => t.name === name)!.annotations?.readOnlyHint, true, name);
