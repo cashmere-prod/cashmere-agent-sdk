@@ -32,7 +32,7 @@
     "build": "tsc",
     "clean": "rm -rf dist",
     "prepublishOnly": "npm run clean && npm run build",
-    "test": "tsx --test src/utils/routing.test.ts src/chains/aptos.test.ts src/chains/sui.test.ts src/chains/evm.test.ts src/signers/sui.test.ts src/signers/evm.test.ts src/utils/address.test.ts src/utils/quote.test.ts src/gas-api.test.ts src/signers/solana.test.ts src/tools/hermes.test.ts src/mcp/server.test.ts"
+    "test": "tsx --test src/utils/routing.test.ts src/chains/aptos.test.ts src/chains/sui.test.ts src/chains/evm.test.ts src/signers/sui.test.ts src/signers/evm.test.ts src/utils/address.test.ts src/utils/quote.test.ts src/gas-api.test.ts src/signers/solana.test.ts src/tools/hermes.test.ts src/mcp/server.test.ts src/goatlp/api.test.ts src/goatlp/guard.test.ts src/goatlp/facts.test.ts src/goatlp/eligibility.test.ts src/goatlp/read.test.ts src/goatlp/write.test.ts src/goatlp/lp.test.ts src/goatlp/deposit.test.ts src/goatlp/keeper.test.ts"
   },
   "dependencies": {
     "viem": "^2.21.0",

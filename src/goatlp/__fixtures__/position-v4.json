@@ -1,0 +1,237 @@
+{
+ "network": "robinhood",
+ "exchange": "uniswapv4",
+ "nft_id": 4006316,
+ "pool": "0xbac3aa3b91584a53a579b3c999a56756e954e59247e497bad1d25a4334bde551",
+ "fee_tier": 8388608,
+ "token0": "0x0000000000000000000000000000000000000000",
+ "token1": "0x5fc5360d0400a0fd4f2af552add042d716f1d168",
+ "tokens": {
+  "0x0000000000000000000000000000000000000000": {
+   "network": "robinhood",
+   "address": "0x0000000000000000000000000000000000000000",
+   "symbol": "ETH",
+   "name": "Ethereum",
+   "decimals": 18,
+   "is_native": true,
+   "price": 2309.232899650865,
+   "price_flag": "GUARDED"
+  },
+  "0x5fc5360d0400a0fd4f2af552add042d716f1d168": {
+   "network": "robinhood",
+   "address": "0x5fc5360d0400a0fd4f2af552add042d716f1d168",
+   "symbol": "USDG",
+   "name": "Global Dollar",
+   "decimals": 6,
+   "is_native": false,
+   "price": 1,
+   "price_flag": "GUARDED"
+  }
+ },
+ "owner": "0x4178b8f0469d5efee99fd07f0c3deff5ca2bb52f",
+ "liquidity": "7629398407350629",
+ "tick_lower": -198960,
+ "tick_upper": -198650,
+ "pool_tick": -198873,
+ "sqrt_price": "3807521184565332504148353",
+ "price_lower": 2289.3331416393485,
+ "price_upper": 2361.4102892231813,
+ "pool_price": 2309.540004615002,
+ "in_range": true,
+ "exited": false,
+ "age": 1.3850694444444445,
+ "current_amount0": "1.753272936746331785",
+ "current_amount1": "1607.494612",
+ "underlying_value": 5656.210159602119,
+ "uncollected_fees0": "0.017308612479300582",
+ "uncollected_fees1": "42.46762",
+ "fees_value": 82.43723738450842,
+ "autocompounding": false,
+ "performance": {
+  "hodl": {
+   "pnl": 77.94591111270884,
+   "roi": 1.376965581160217,
+   "apr": 362.86443191667587,
+   "pool_pnl": 77.98560151501817,
+   "pool_roi": 1.377676397791593,
+   "pool_apr": 363.05174965117135,
+   "il": -4.4516358694902465,
+   "fee_apr": 383.7730662876618,
+   "apr_reason": null
+  },
+  "usd": {
+   "pnl": 55.61655646597653,
+   "roi": 0.9786425241514475,
+   "apr": 257.8964706412639,
+   "pool_pnl": 55.65656366259316,
+   "pool_roi": 0.9793533949805637,
+   "pool_apr": 258.0838026582021,
+   "il": -26.780673721915264,
+   "fee_apr": 382.2651728516627,
+   "apr_reason": null
+  },
+  "eth": {
+   "pnl": 0.04357172272409785,
+   "roi": 1.7846171993746331,
+   "apr": 470.290699419056,
+   "pool_pnl": 0.04358891042409785,
+   "pool_roi": 1.7853337441152946,
+   "pool_apr": 470.4795266517918,
+   "il": 0.007889939827856907,
+   "fee_apr": 385.31627396410414,
+   "apr_reason": null
+  },
+  "token0": {
+   "pnl": 0.04357172272409785,
+   "roi": 1.7846171993746331,
+   "apr": 470.290699419056,
+   "pool_pnl": 0.04358891042409785,
+   "pool_roi": 1.7853337441152946,
+   "pool_apr": 470.4795266517918,
+   "il": 0.007889939827856907,
+   "fee_apr": 385.31627396410414,
+   "apr_reason": null
+  },
+  "token1": {
+   "pnl": 55.61655646597653,
+   "roi": 0.9786425241514475,
+   "apr": 257.8964706412639,
+   "pool_pnl": 55.65656366259316,
+   "pool_roi": 0.9793533949805637,
+   "pool_apr": 258.0838026582021,
+   "il": -26.780673721915264,
+   "fee_apr": 382.2651728516627,
+   "apr_reason": null
+  }
+ },
+ "uncollected_fees_value": 82.43723738450842,
+ "closed_at_ts": null,
+ "cash_flows": [
+  {
+   "type": "gas-costs",
+   "timestamp": 1792972698,
+   "block_number": 97983846,
+   "tx_hash": "0x13109730ab4f4d81871bcb052078c2255d5b7a8bce580157f86333cbd093f80a",
+   "log_index": null,
+   "owner": "0x4178b8f0469d5efee99fd07f0c3deff5ca2bb52f",
+   "payer": "0x9729585607568dcbf1f5f3802afbf5b221702932",
+   "amount": "-0.0000171877",
+   "amount_usd": -0.04000719661663122,
+   "gas_used": 859385,
+   "gas_price": 2e-11,
+   "with_receipt": true,
+   "prices": {
+    "native_token": {
+     "usd": 2327.6643539642428,
+     "eth": 1,
+     "token0": 1,
+     "token1": 2327.6643539642428
+    }
+   }
+  },
+  {
+   "type": "transfer",
+   "timestamp": 1792972698,
+   "block_number": 97983846,
+   "tx_hash": "0x13109730ab4f4d81871bcb052078c2255d5b7a8bce580157f86333cbd093f80a",
+   "log_index": 83,
+   "owner": "0x4178b8f0469d5efee99fd07f0c3deff5ca2bb52f",
+   "from": "0x0000000000000000000000000000000000000000",
+   "to": "0x4178b8f0469d5efee99fd07f0c3deff5ca2bb52f",
+   "liquidity": "0",
+   "prices": {}
+  },
+  {
+   "timestamp": 1792972698,
+   "block_number": 97983846,
+   "tx_hash": "0x13109730ab4f4d81871bcb052078c2255d5b7a8bce580157f86333cbd093f80a",
+   "log_index": 84,
+   "owner": "0x4178b8f0469d5efee99fd07f0c3deff5ca2bb52f",
+   "type": "deposits",
+   "amount0": "-1.211463700735674656",
+   "amount1": "-2863.109961",
+   "amount_usd": -5682.990833324035,
+   "liquidity": "7629398407350629",
+   "prices": {
+    "token0": {
+     "usd": 2327.6643539642428,
+     "eth": 1,
+     "token0": 1,
+     "token1": 2327.6643539642428
+    },
+    "token1": {
+     "usd": 1,
+     "eth": 0.0004296152056016586,
+     "token0": 0.0004296152056016586,
+     "token1": 1
+    },
+    "native_token": {
+     "usd": 2327.6643539642428,
+     "eth": 1,
+     "token0": 1,
+     "token1": 2327.6643539642428
+    }
+   }
+  },
+  {
+   "timestamp": 1793092368,
+   "block_number": 99130245,
+   "tx_hash": null,
+   "log_index": null,
+   "owner": "0x4178b8f0469d5efee99fd07f0c3deff5ca2bb52f",
+   "current": true,
+   "type": "unclaimed-fees-state",
+   "amount0": "0.017308612479300582",
+   "amount1": "42.46762",
+   "amount_usd": 82.43723738450842,
+   "liquidity": "7629398407350629",
+   "prices": {
+    "token0": {
+     "usd": 2309.232899650865,
+     "eth": 1,
+     "token0": 1,
+     "token1": 2309.232899650865
+    },
+    "token1": {
+     "usd": 1,
+     "eth": 0.0004330442373964059,
+     "token0": 0.0004330442373964059,
+     "token1": 1
+    }
+   }
+  },
+  {
+   "timestamp": 1793092368,
+   "block_number": 99130245,
+   "tx_hash": null,
+   "log_index": null,
+   "owner": "0x4178b8f0469d5efee99fd07f0c3deff5ca2bb52f",
+   "current": true,
+   "type": "current-amount-state",
+   "amount0": "1.753272936746331785",
+   "amount1": "1607.494612",
+   "amount_usd": 5656.210159602119,
+   "liquidity": "7629398407350629",
+   "prices": {
+    "token0": {
+     "usd": 2309.232899650865,
+     "eth": 1,
+     "token0": 1,
+     "token1": 2309.232899650865
+    },
+    "token1": {
+     "usd": 1,
+     "eth": 0.0004330442373964059,
+     "token0": 0.0004330442373964059,
+     "token1": 1
+    },
+    "native_token": {
+     "usd": 2309.232899650865,
+     "eth": 1,
+     "token0": 1,
+     "token1": 2309.232899650865
+    }
+   }
+  }
+ ]
+}

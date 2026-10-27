@@ -1,0 +1,66 @@
+{
+ "success": true,
+ "display_only": true,
+ "range_fee_pct": 0.15,
+ "exit_fee_pct": 0.15,
+ "compound_take_pct": 10,
+ "exit_default_offset_pct": 5,
+ "keeper": {
+  "gas_multiple": 1.25,
+  "gas_units": {
+   "v3": 1137460,
+   "v4": 1060304
+  },
+  "gas_price_gwei": 0.020454,
+  "eth_usd": 2309.79,
+  "move_gas_usd": {
+   "v3": 0.0537,
+   "v4": 0.0501
+  },
+  "keeper_need_usd": {
+   "v3": 0.0672,
+   "v4": 0.0626
+  },
+  "min_position_usd": {
+   "v3": 44.8,
+   "v4": 41.7
+  },
+  "min_position_display_usd": 50,
+  "exit_subsidy": {
+   "per_exit_eth": 0.0001,
+   "per_day_eth": 0.002,
+   "per_owner_per_day": 3
+  },
+  "updated": 1793092020
+ },
+ "pools": [
+  {
+   "venue": "v4",
+   "pair": "ETH/GOOGL",
+   "pool": "0xe4d9d8c880cedae4ed7884609969c262cd1138a328e05eca7b32f834e649609d",
+   "fee": 2100,
+   "ts": 21,
+   "hook": null,
+   "G": 100,
+   "W_min": 420,
+   "T_min": 101,
+   "interval_h_default": 6,
+   "budget_default": 20,
+   "withdraw_only": false
+  },
+  {
+   "venue": "v4",
+   "pair": "ETH/SPCX",
+   "pool": "0x541942afd092e6c18ccd56bb3d9205f80a2adce77edf260c464c5f9919f37168",
+   "fee": 3000,
+   "ts": 30,
+   "hook": null,
+   "G": 100,
+   "W_min": 420,
+   "T_min": 101,
+   "interval_h_default": 6,
+   "budget_default": 20,
+   "withdraw_only": true
+  }
+ ]
+}

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import {
-  SECRET_ENV_NAMES, bridgeEnabled, createCashmereMcpServer, redact, serverOptionsFromEnv, signerChains,
+  SECRET_ENV_NAMES, bridgeEnabled, createCashmereMcpServer, goatlpWritesEnabled, redact, serverOptionsFromEnv, signerChains,
   type CashmereMcpServerOptions,
 } from './server';
 
@@ -29,10 +29,17 @@ function status(): string {
   return 'no private key set, cashmere_bridge is off';
 }
 
+function goatlpStatus(): string {
+  if (!goatlpWritesEnabled(options)) return 'Goat LP read tools only';
+  const cap = options.goatlp?.maxDepositUsd === undefined ? '' : `, at most ${options.goatlp.maxDepositUsd} USD per deposit`;
+  const total = options.goatlp?.maxTotalUsd === undefined ? '' : `, ${options.goatlp.maxTotalUsd} USD in total`;
+  return `Goat LP write tools sign with the EVM key on Robinhood Chain${cap}${total}`;
+}
+
 createCashmereMcpServer(options)
   .connect(new StdioServerTransport())
-  .then(() => console.error(`cashmere-mcp: running on stdio, ${status()}`))
+  .then(() => console.error(`cashmere-mcp: running on stdio, ${status()}; ${goatlpStatus()}`))
   .catch(err => {
-    console.error(`cashmere-mcp: ${redact(err instanceof Error ? err.message : String(err), options.config)}`);
+    console.error(`cashmere-mcp: ${redact(err instanceof Error ? err.message : String(err), options.config, [options.goatlp?.rpcUrl])}`);
     process.exit(1);
   });

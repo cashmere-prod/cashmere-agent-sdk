@@ -1,0 +1,240 @@
+{
+ "success": true,
+ "data": [
+  {
+   "network": "robinhood",
+   "exchange": "uniswapv4",
+   "nft_id": 4006316,
+   "pool": "0xbac3aa3b91584a53a579b3c999a56756e954e59247e497bad1d25a4334bde551",
+   "fee_tier": 8388608,
+   "token0": "0x0000000000000000000000000000000000000000",
+   "token1": "0x5fc5360d0400a0fd4f2af552add042d716f1d168",
+   "tokens": {
+    "0x0000000000000000000000000000000000000000": {
+     "network": "robinhood",
+     "address": "0x0000000000000000000000000000000000000000",
+     "symbol": "ETH",
+     "name": "Ethereum",
+     "decimals": 18,
+     "is_native": true,
+     "price": 2309.232899650865,
+     "price_flag": "GUARDED"
+    },
+    "0x5fc5360d0400a0fd4f2af552add042d716f1d168": {
+     "network": "robinhood",
+     "address": "0x5fc5360d0400a0fd4f2af552add042d716f1d168",
+     "symbol": "USDG",
+     "name": "Global Dollar",
+     "decimals": 6,
+     "is_native": false,
+     "price": 1,
+     "price_flag": "GUARDED"
+    }
+   },
+   "owner": "0x4178b8f0469d5efee99fd07f0c3deff5ca2bb52f",
+   "liquidity": "7629398407350629",
+   "tick_lower": -198960,
+   "tick_upper": -198650,
+   "pool_tick": -198873,
+   "sqrt_price": "3807521184565332504148353",
+   "price_lower": 2289.3331416393485,
+   "price_upper": 2361.4102892231813,
+   "pool_price": 2309.540004615002,
+   "in_range": true,
+   "exited": false,
+   "age": 1.3849537037037036,
+   "current_amount0": "1.753272936746331785",
+   "current_amount1": "1607.494612",
+   "underlying_value": 5656.210159602119,
+   "uncollected_fees0": "0.017308612479300582",
+   "uncollected_fees1": "42.46762",
+   "fees_value": 82.43723738450842,
+   "autocompounding": false,
+   "performance": {
+    "hodl": {
+     "pnl": 77.94591111270884,
+     "roi": 1.376965581160217,
+     "apr": 362.89475653909915,
+     "pool_pnl": 77.98560151501817,
+     "pool_roi": 1.377676397791593,
+     "pool_apr": 363.0820899277593,
+     "il": -4.4516358694902465,
+     "fee_apr": 383.8051382470707,
+     "apr_reason": null
+    },
+    "usd": {
+     "pnl": 55.61655646597653,
+     "roi": 0.9786425241514475,
+     "apr": 257.9180230790577,
+     "pool_pnl": 55.65656366259316,
+     "pool_roi": 0.9793533949805637,
+     "pool_apr": 258.1053707513543,
+     "il": -26.780673721915264,
+     "fee_apr": 382.2971187962434,
+     "apr_reason": null
+    },
+    "eth": {
+     "pnl": 0.04357172272409785,
+     "roi": 1.7846171993746331,
+     "apr": 470.3300016670436,
+     "pool_pnl": 0.04358891042409785,
+     "pool_roi": 1.7853337441152946,
+     "pool_apr": 470.518844680093,
+     "il": 0.007889939827856907,
+     "fee_apr": 385.3484748895566,
+     "apr_reason": null
+    },
+    "token0": {
+     "pnl": 0.04357172272409785,
+     "roi": 1.7846171993746331,
+     "apr": 470.3300016670436,
+     "pool_pnl": 0.04358891042409785,
+     "pool_roi": 1.7853337441152946,
+     "pool_apr": 470.518844680093,
+     "il": 0.007889939827856907,
+     "fee_apr": 385.3484748895566,
+     "apr_reason": null
+    },
+    "token1": {
+     "pnl": 55.61655646597653,
+     "roi": 0.9786425241514475,
+     "apr": 257.9180230790577,
+     "pool_pnl": 55.65656366259316,
+     "pool_roi": 0.9793533949805637,
+     "pool_apr": 258.1053707513543,
+     "il": -26.780673721915264,
+     "fee_apr": 382.2971187962434,
+     "apr_reason": null
+    }
+   },
+   "uncollected_fees_value": 82.43723738450842,
+   "closed_at_ts": null
+  },
+  {
+   "network": "robinhood",
+   "exchange": "uniswapv3",
+   "nft_id": 1489972,
+   "pool": "0x8ac92da74ab5f3b1d024dc1943ad7e15dc4179ef",
+   "fee_tier": 3000,
+   "token0": "0x12f190a9f9d7d37a250758b26824b97ce941bf54",
+   "token1": "0x5fc5360d0400a0fd4f2af552add042d716f1d168",
+   "tokens": {
+    "0x12f190a9f9d7d37a250758b26824b97ce941bf54": {
+     "network": "robinhood",
+     "address": "0x12f190a9f9d7d37a250758b26824b97ce941bf54",
+     "symbol": "AMZN",
+     "name": "Amazon \u2022 Robinhood Token",
+     "decimals": 18,
+     "is_native": false,
+     "price": 248.9988239092263,
+     "price_flag": "GUARDED"
+    },
+    "0x5fc5360d0400a0fd4f2af552add042d716f1d168": {
+     "network": "robinhood",
+     "address": "0x5fc5360d0400a0fd4f2af552add042d716f1d168",
+     "symbol": "USDG",
+     "name": "Global Dollar",
+     "decimals": 6,
+     "is_native": false,
+     "price": 1,
+     "price_flag": "GUARDED"
+    },
+    "0x0bd7d308f8e1639fab988df18a8011f41eacad73": {
+     "network": "robinhood",
+     "address": "0x0bd7d308f8e1639fab988df18a8011f41eacad73",
+     "symbol": "WETH",
+     "name": "WETH",
+     "decimals": 18,
+     "is_native": false,
+     "price": 2309.232899650865,
+     "price_flag": "GUARDED"
+    }
+   },
+   "owner": "0x4178b8f0469d5efee99fd07f0c3deff5ca2bb52f",
+   "liquidity": "14732486021543492",
+   "tick_lower": -221280,
+   "tick_upper": -221100,
+   "pool_tick": -221147,
+   "sqrt_price": "1250196364444340771933996",
+   "price_lower": 245.70397119504588,
+   "price_upper": 250.1664614878318,
+   "pool_price": 248.9988239092263,
+   "in_range": true,
+   "exited": false,
+   "age": 3.7863078703703703,
+   "current_amount0": "2.181393538089607292",
+   "current_amount1": "1543.217969",
+   "underlying_value": 2086.382394467498,
+   "uncollected_fees0": "0.046124870461605662",
+   "uncollected_fees1": "12.204165",
+   "fees_value": 23.689203497905222,
+   "autocompounding": false,
+   "performance": {
+    "hodl": {
+     "pnl": 23.293808254147436,
+     "roi": 1.1162572444941807,
+     "apr": 107.60717516627128,
+     "pool_pnl": 23.34487815825923,
+     "pool_roi": 1.1187319324888298,
+     "pool_apr": 107.8457350375156,
+     "il": -0.3443253396459909,
+     "fee_apr": 109.4337277329766,
+     "apr_reason": null
+    },
+    "usd": {
+     "pnl": 25.30097448764074,
+     "roi": 1.2136095070945638,
+     "apr": 116.99193125734529,
+     "pool_pnl": 25.353582815051308,
+     "pool_roi": 1.216163655266479,
+     "pool_apr": 117.23815108802636,
+     "il": 1.6643793171460857,
+     "fee_apr": 109.53908785300001,
+     "apr_reason": null
+    },
+    "eth": {
+     "pnl": 0.03735692567270747,
+     "roi": 4.262555412254152,
+     "apr": 410.91025313812537,
+     "pool_pnl": 0.03737904120038747,
+     "pool_roi": 4.26518650126088,
+     "pool_apr": 411.16389006368314,
+     "il": 0.027120568137108836,
+     "fee_apr": 112.83882940940515,
+     "apr_reason": null
+    },
+    "token0": {
+     "pnl": 0.08120676432382962,
+     "roi": 0.9675515999189354,
+     "apr": 93.27195412027238,
+     "pool_pnl": 0.08141855863300804,
+     "pool_roi": 0.97009953876429,
+     "pool_apr": 93.51757537200209,
+     "il": -0.013719254172650963,
+     "fee_apr": 109.27279008096816,
+     "apr_reason": null
+    },
+    "token1": {
+     "pnl": 25.30097448764074,
+     "roi": 1.2136095070945638,
+     "apr": 116.99193125734529,
+     "pool_pnl": 25.353582815051308,
+     "pool_roi": 1.216163655266479,
+     "pool_apr": 117.23815108802636,
+     "il": 1.6643793171460857,
+     "fee_apr": 109.53908785300001,
+     "apr_reason": null
+    }
+   },
+   "uncollected_fees_value": 23.689203497905222,
+   "closed_at_ts": null
+  }
+ ],
+ "pagination": {
+  "page_size": 5,
+  "total_count": 2,
+  "has_next": false,
+  "next_cursor": null
+ },
+ "exited_count": 293
+}
