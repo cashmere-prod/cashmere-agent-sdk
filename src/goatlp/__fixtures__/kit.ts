@@ -3,15 +3,20 @@
 // throwaway signer. No test reaches the network.
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { decodeFunctionData, keccak256, type Abi, type Address, type Hex } from 'viem';
+import { decodeAbiParameters, decodeFunctionData, encodeAbiParameters, keccak256, toEventSelector, type Abi, type Address, type Hex } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
-import type { GoatChain, GoatSigner, McCall, McRes, TypedDataToSign } from '../chain';
+import type { GoatChain, GoatSigner, McCall, McRes, TxLog, TxReceipt, TypedDataToSign } from '../chain';
 import {
   AUTO_EXIT_V3, AUTO_RANGE_V3, GOAT_AUTO_COMPOUND_V3, GOAT_AUTO_COMPOUND_V4, GOAT_PAIR_TABLE, GOAT_PRICE_ANCHOR, GOAT_TREASURY,
   GOAT_V4_COMPOUNDOR, GOAT_V4_PAIR_REGISTRY, GOAT_V4_STEWARD, GOAT_V4_STEWARD_ENGINE, NPM, PINS, POSM,
 } from '../constants';
 import type { FetchLike } from '../api';
-import { autoExitAbi as autoExitAbiK, autoRangeAbi as autoRangeAbiK, gac3Abi as gac3AbiK, gac4Abi as gac4AbiK, npmAbi as npmAbiK, posmAbi as posmAbiK, stewardAbi as stewardAbiK } from '../abis';
+import {
+  autoExitAbi as autoExitAbiK, autoRangeAbi as autoRangeAbiK, erc20Abi as erc20AbiK, gac3Abi as gac3AbiK, gac4Abi as gac4AbiK, npmAbi as npmAbiK,
+  permit2Abi as permit2AbiK, posmAbi as posmAbiK, stewardAbi as stewardAbiK,
+} from '../abis';
+import { Actions, V4_PARAMS, decodeUnlockData } from '../lp/encode';
+import { getSqrtRatioAtTick } from '../lp/tickMath';
 import type { Spenders } from '../calldata';
 import { TARGETS } from '../facts';
 import type { GuardCtx } from '../guard';
@@ -42,6 +47,10 @@ export class FakeChain implements GoatChain {
   simulate: (tx: { from: Address; to: Address; data: Hex; value?: bigint }) => Hex = () => '0x';
   simulated: { from: Address; to: Address; data: Hex; value?: bigint }[] = [];
   receiptStatus: (hash: Hex) => 'success' | 'reverted' = () => 'success';
+  /** logs of a receipt (by default none) */
+  receiptLogs: (hash: Hex) => TxLog[] = () => [];
+  /** ETH balances, by lower-case address */
+  balances = new Map<string, bigint>();
   block = 1000n;
 
   constructor() {
@@ -87,7 +96,8 @@ export class FakeChain implements GoatChain {
   }
   async call(tx: { from: Address; to: Address; data: Hex; value?: bigint }) { this.simulated.push(tx); return this.simulate(tx); }
   async blockTimestamp() { return this.time; }
-  async waitReceipt(hash: Hex) { this.block += 1n; return { status: this.receiptStatus(hash), blockNumber: this.block }; }
+  async balance(a: Address) { return this.balances.get(lc(a)) ?? 0n; }
+  async waitReceipt(hash: Hex): Promise<TxReceipt> { this.block += 1n; return { status: this.receiptStatus(hash), blockNumber: this.block, logs: this.receiptLogs(hash) }; }
 }
 
 /** Decode a call against an ABI (for asserting what the fake chain was asked) */
@@ -320,4 +330,205 @@ export function writeWorld(o: { v4Range?: [number, number] } = {}) {
   const signer = new FakeSigner();
   signer.onSend = (tx) => playTx(w.st, signer.address, tx);
   return { ...w, signer };
+}
+
+// ------------------------------------------------------------------ deposits
+
+export const WETH_USDG_V3 = '0x69bfaf19c9f377bb306a89aed9f6b07e2c1a8d9a' as Address;
+/** slot0 of the WETH/USDG 0.05% pool, read on chain */
+export const WETH_USDG_SQRT = 3813742849960397548252994n;
+export const WETH_USDG_TICK = -198840;
+export const AMZN_TICK = -221190;
+/** a hook-free v4 ETH/USDG pool of the tests, and a position in it */
+export const KEY_V4_FREE = { currency0: ZERO, currency1: USDG_T, fee: 500, tickSpacing: 10, hooks: ZERO };
+export const V4_FREE_POS = 5000001n;
+export const COPY_TSLA = '0x00000000000000000000000000000000000c0b1a' as Address;
+export const TAX_TOKEN = '0x337f3f7384a2e2cfb9757971d469773f23e509f0' as Address;
+export const FEEDS = {
+  weth: '0x78F3556b67E17Df817D51Ef5a990cDaF09E8d3A9' as Address,
+  usdg: '0x61B7e5650328764B076A108EFF5fa7282a1B9aD2' as Address,
+  amzn: '0xD5a1508ceD74c084eBf3cBe853e2C968fB2a651C' as Address,
+};
+const PERMIT2_A = '0x000000000022D473030F116dDEE9F6B43aC78BA3' as Address;
+const POOL_MANAGER_A = '0x8366a39CC670B4001A1121B8F6A443A643e40951' as Address;
+const V3_FACTORY_A = '0x1f7d7550B1b028f7571E69A784071F0205FD2EfA' as Address;
+const TRANSFER = toEventSelector('event Transfer(address indexed from, address indexed to, uint256 indexed tokenId)');
+
+export interface LpState {
+  /** ERC20 balances and allowances by `${token}:${owner}` and `${token}:${owner}:${spender}` */
+  bal: Map<string, bigint>;
+  allowance: Map<string, bigint>;
+  /** Permit2 allowances by `${owner}:${token}:${spender}` */
+  permit2: Map<string, { amount: bigint; expiration: number }>;
+  liquidity: Map<string, bigint>;
+  nextId: bigint;
+  /** the receipt logs of the next mint */
+  minted: Hex[] | null;
+}
+
+/** The v4 PoolManager slot0 word of a pool */
+export const slot0Word = (sqrtPriceX96: bigint, tick: number, lpFee: number) =>
+  (BigInt(lpFee) << 208n) | (BigInt(tick < 0 ? tick + 0x1000000 : tick) << 160n) | sqrtPriceX96;
+export const slotOf = (poolId: Hex) => keccak256(encodeAbiParameters([{ type: 'bytes32' }, { type: 'uint256' }], [poolId, 6n]));
+
+/**
+ * The write world plus what a deposit reads: three tokens (WETH, USDG, AMZN), a copied ticker and a token that takes a fee,
+ * the WETH/USDG and AMZN/USDG v3 pools, a hook-free v4 ETH/USDG pool with one position of the wallet, fresh Chainlink feeds
+ * at the pools' prices, the wallet's balances (10 ETH) and no allowances. Sent approvals and deposits play onto it; the
+ * deposit's simulation reverts while an allowance it needs is missing.
+ */
+export function lpWorld(o: { ethPrice?: number } = {}) {
+  const w = writeWorld();
+  const { chain, signer } = w;
+  const me = lc(signer.address);
+  const lp: LpState = { bal: new Map(), allowance: new Map(), permit2: new Map(), liquidity: new Map([[`v3:${V3_POS}`, 14732486021543492n], [`v4:${V4_FREE_POS}`, 10n ** 15n]]), nextId: 6_000_000n, minted: null };
+  const tokens: Record<string, { decimals: number; symbol: string }> = {
+    [WETH_T]: { decimals: 18, symbol: 'WETH' }, [USDG_T]: { decimals: 6, symbol: 'USDG' }, [AMZN]: { decimals: 18, symbol: 'AMZN' },
+    [COPY_TSLA]: { decimals: 18, symbol: 'TSLA' }, [TAX_TOKEN]: { decimals: 18, symbol: 'TAXX' },
+  };
+  for (const [t, m] of Object.entries(tokens)) {
+    chain.on(t, 'decimals', m.decimals).on(t, 'symbol', m.symbol)
+      .on(t, 'balanceOf', (a: readonly unknown[]) => lp.bal.get(`${t}:${lc(a[0] as string)}`) ?? 0n)
+      .on(t, 'allowance', (a: readonly unknown[]) => lp.allowance.get(`${t}:${lc(a[0] as string)}:${lc(a[1] as string)}`) ?? 0n);
+  }
+  lp.bal.set(`${WETH_T}:${me}`, 5n * 10n ** 18n);
+  lp.bal.set(`${USDG_T}:${me}`, 20_000n * 10n ** 6n);
+  lp.bal.set(`${AMZN}:${me}`, 50n * 10n ** 18n);
+  chain.balances.set(me, 10n * 10n ** 18n);
+  chain.on(PERMIT2_A, 'allowance', (a: readonly unknown[]) => {
+    const p = lp.permit2.get(`${lc(a[0] as string)}:${lc(a[1] as string)}:${lc(a[2] as string)}`);
+    return p ? [p.amount, p.expiration, 0] : [0n, 0, 0];
+  });
+  // v3 pools and the factory
+  const v3Pools: Record<string, { t0: Address; t1: Address; fee: number; spacing: number; sqrt: bigint; tick: number }> = {
+    [WETH_USDG_V3]: { t0: WETH_T, t1: USDG_T, fee: 500, spacing: 10, sqrt: WETH_USDG_SQRT, tick: WETH_USDG_TICK },
+    [AMZN_USDG_V3]: { t0: AMZN, t1: USDG_T, fee: 3000, spacing: 60, sqrt: sqrtAt(AMZN_TICK), tick: AMZN_TICK },
+    '0x00000000000000000000000000000000000c0b1b': { t0: COPY_TSLA, t1: USDG_T, fee: 3000, spacing: 60, sqrt: sqrtAt(-221190), tick: -221190 },
+    '0x00000000000000000000000000000000000c0b1c': { t0: TAX_TOKEN, t1: USDG_T, fee: 3000, spacing: 60, sqrt: sqrtAt(-221190), tick: -221190 },
+  };
+  for (const [p, d] of Object.entries(v3Pools)) {
+    chain.on(p, 'token0', d.t0).on(p, 'token1', d.t1).on(p, 'fee', d.fee).on(p, 'tickSpacing', d.spacing).on(p, 'slot0', () => [d.sqrt, d.tick, 0, 1, 1, 0, true]);
+  }
+  chain.on(V3_FACTORY_A, 'getPool', (a: readonly unknown[]) => {
+    const [x, y, fee] = [lc(a[0] as string), lc(a[1] as string), Number(a[2])];
+    const hit = Object.entries(v3Pools).find(([, d]) => d.fee === fee && ((d.t0 === x && d.t1 === y) || (d.t0 === y && d.t1 === x)));
+    return hit ? hit[0] : ZERO;
+  });
+  chain.on(NPM, 'positions', (a: readonly unknown[]) => {
+    const id = BigInt(a[0] as bigint);
+    if (id !== V3_POS) throw new Error('NOT_MINTED');
+    return [0n, ZERO, AMZN, USDG_T, 3000, -221280, -221100, lp.liquidity.get(`v3:${V3_POS}`)!, 0n, 0n, 0n, 0n];
+  });
+  // the hook-free v4 pool and the position in it
+  const freeId = poolIdOfKey(KEY_V4_FREE);
+  const slots = new Map<string, bigint>([[lc(slotOf(freeId)), slot0Word(WETH_USDG_SQRT, WETH_USDG_TICK, 500)], [lc(slotOf(ETH_USDG_V4)), slot0Word(WETH_USDG_SQRT, WETH_USDG_TICK, 1243)]]);
+  chain.on(POOL_MANAGER_A, 'extsload', (a: readonly unknown[]) => `0x${(slots.get(lc(a[0] as string)) ?? 0n).toString(16).padStart(64, '0')}`);
+  w.st.owner.set(`v4:${V4_FREE_POS}`, signer.address);
+  const infoOld = chain.handlers.get(`${lc(POSM)}:getPoolAndPositionInfo`)!;
+  chain.on(POSM, 'getPoolAndPositionInfo', (a: readonly unknown[], c: McCall) => (BigInt(a[0] as bigint) === V4_FREE_POS ? [KEY_V4_FREE, v4Info(-199200, -198600)] : infoOld(a, c)));
+  const liqOld = chain.handlers.get(`${lc(POSM)}:getPositionLiquidity`)!;
+  chain.on(POSM, 'getPositionLiquidity', (a: readonly unknown[], c: McCall) => (BigInt(a[0] as bigint) === V4_FREE_POS ? lp.liquidity.get(`v4:${V4_FREE_POS}`)! : liqOld(a, c)));
+  // Chainlink at the pools' prices (8 decimals, updated a minute ago)
+  const ethUsd = o.ethPrice ?? priceOf(WETH_USDG_TICK, 18, 6);
+  const round = (usd: number) => [100n, BigInt(Math.round(usd * 1e8)), BigInt(NOW_SEC - 60), BigInt(NOW_SEC - 60), 100n];
+  chain.on(FEEDS.weth, 'decimals', 8).on(FEEDS.weth, 'latestRoundData', () => round(ethUsd))
+    .on(FEEDS.usdg, 'decimals', 8).on(FEEDS.usdg, 'latestRoundData', () => round(1))
+    .on(FEEDS.amzn, 'decimals', 8).on(FEEDS.amzn, 'latestRoundData', () => round(priceOf(AMZN_TICK, 18, 6)));
+  // a deposit's simulation reverts while an allowance it needs is missing
+  chain.simulate = (tx) => { const why = missingAllowance(lp, tx, chain.time); if (why) throw new Error(`execution reverted: ${why}`); return '0x'; };
+  signer.onSend = (tx) => { playTx(w.st, signer.address, tx); playLp(lp, w.st, signer.address, tx); };
+  chain.receiptLogs = () => { const m = lp.minted; lp.minted = null; return m ? [{ address: m[0] as Address, topics: m.slice(1) as Hex[], data: '0x' }] : []; };
+  return { ...w, lp, freeId };
+}
+
+const sqrtAt = (tick: number) => getSqrtRatioAtTick(tick);
+const priceOf = (tick: number, d0: number, d1: number) => Math.pow(1.0001, tick) * 10 ** (d0 - d1);
+const poolIdOfKey = (k: typeof KEY_V4_FREE) => keccak256(encodeAbiParameters(
+  [{ type: 'address' }, { type: 'address' }, { type: 'uint24' }, { type: 'int24' }, { type: 'address' }], [k.currency0, k.currency1, k.fee, k.tickSpacing, k.hooks]));
+
+/** What a deposit pulls, decoded: per token the amount it may take, and from whom */
+function depositNeeds(tx: { to: Address; data: Hex; value?: bigint }): { venue: Venue; take: [Address, bigint][]; mint: boolean; id?: bigint } | null {
+  const to = lc(tx.to);
+  if (to === lc(NPM)) {
+    let c = decodeFunctionData({ abi: npmAbiK as Abi, data: tx.data }) as { functionName: string; args: readonly unknown[] };
+    let ethPaid = false;
+    if (c.functionName === 'multicall') { c = decodeFunctionData({ abi: npmAbiK as Abi, data: (c.args[0] as Hex[])[0] }) as typeof c; ethPaid = true; }
+    const p = c.args[0] as Record<string, unknown>;
+    if (c.functionName === 'mint') {
+      const take: [Address, bigint][] = [[p.token0 as Address, p.amount0Desired as bigint], [p.token1 as Address, p.amount1Desired as bigint]];
+      return { venue: 'v3', take: ethPaid ? take.filter(([t]) => lc(t) !== WETH_T) : take, mint: true };
+    }
+    if (c.functionName === 'increaseLiquidity') {
+      const take: [Address, bigint][] = [[AMZN, p.amount0Desired as bigint], [USDG_T, p.amount1Desired as bigint]];
+      return { venue: 'v3', take: ethPaid ? take.filter(([t]) => lc(t) !== WETH_T) : take, mint: false, id: p.tokenId as bigint };
+    }
+    return null;
+  }
+  if (to === lc(POSM)) {
+    const c = decodeFunctionData({ abi: posmAbiK as Abi, data: tx.data }) as { functionName: string; args: readonly unknown[] };
+    if (c.functionName !== 'modifyLiquidities') return null;
+    const { actions, params } = decodeUnlockData(c.args[0] as Hex);
+    if (actions[0] === Actions.MINT_POSITION) {
+      const m = decodeAbiParameters(V4_PARAMS.mint, params[0]);
+      const k = m[0] as { currency0: Address; currency1: Address };
+      return { venue: 'v4', take: ([[k.currency0, m[4] as bigint], [k.currency1, m[5] as bigint]] as [Address, bigint][]).filter(([t]) => !/^0x0{40}$/i.test(t)), mint: true };
+    }
+    if (actions[0] === Actions.INCREASE_LIQUIDITY) {
+      const p = decodeAbiParameters(V4_PARAMS.increase, params[0]);
+      const [c0] = decodeAbiParameters(V4_PARAMS.close, params[1]);
+      const [c1] = decodeAbiParameters(V4_PARAMS.close, params[2]);
+      return { venue: 'v4', take: ([[c0, p[2] as bigint], [c1, p[3] as bigint]] as [Address, bigint][]).filter(([t]) => !/^0x0{40}$/i.test(t)), mint: false, id: p[0] as bigint };
+    }
+  }
+  return null;
+}
+
+function missingAllowance(lp: LpState, tx: { from: Address; to: Address; data: Hex; value?: bigint }, now: number): string | null {
+  const d = depositNeeds(tx);
+  if (!d) return null;
+  const from = lc(tx.from);
+  for (const [t, amount] of d.take) {
+    if (amount <= 0n) continue;
+    if (d.venue === 'v3' && (lp.allowance.get(`${lc(t)}:${from}:${lc(NPM)}`) ?? 0n) < amount) return 'STF';
+    if (d.venue === 'v4') {
+      if ((lp.allowance.get(`${lc(t)}:${from}:${lc(PERMIT2_A)}`) ?? 0n) < amount) return 'TRANSFER_FROM_FAILED';
+      const p = lp.permit2.get(`${from}:${lc(t)}:${lc(POSM)}`);
+      if (!p || p.amount < amount) return 'InsufficientAllowance';
+      if (p.expiration < now) return 'AllowanceExpired';
+    }
+  }
+  return null;
+}
+
+/** Play an approval or a deposit onto the deposit state */
+function playLp(lp: LpState, st: WorldState, from: Address, tx: { to: Address; data: Hex; value: bigint }): void {
+  const to = lc(tx.to);
+  const f = lc(from);
+  if (to === lc(PERMIT2_A)) {
+    const c = decodeFunctionData({ abi: permit2AbiK as Abi, data: tx.data }) as { args: readonly unknown[] };
+    const [token, spender, amount, expiration] = c.args as [Address, Address, bigint, number];
+    lp.permit2.set(`${f}:${lc(token)}:${lc(spender)}`, { amount, expiration: Number(expiration) });
+    return;
+  }
+  if ([WETH_T, USDG_T, AMZN, COPY_TSLA, TAX_TOKEN].includes(to as Address)) {
+    const c = decodeFunctionData({ abi: erc20AbiK as Abi, data: tx.data }) as { args: readonly unknown[] };
+    lp.allowance.set(`${to}:${f}:${lc(c.args[0] as string)}`, c.args[1] as bigint);
+    return;
+  }
+  const d = depositNeeds(tx);
+  if (!d) return;
+  for (const [t, amount] of d.take) {
+    const k = `${lc(t)}:${f}`;
+    lp.bal.set(k, (lp.bal.get(k) ?? 0n) - amount);
+    if (d.venue === 'v3') lp.allowance.set(`${lc(t)}:${f}:${lc(NPM)}`, (lp.allowance.get(`${lc(t)}:${f}:${lc(NPM)}`) ?? 0n) - amount);
+  }
+  if (d.mint) {
+    const id = lp.nextId++;
+    st.owner.set(`${d.venue}:${id}`, from);
+    const nft = d.venue === 'v3' ? NPM : POSM;
+    lp.minted = [nft, TRANSFER, `0x${'0'.repeat(64)}`, `0x${f.slice(2).padStart(64, '0')}`, `0x${id.toString(16).padStart(64, '0')}`] as Hex[];
+  } else {
+    const k = `${d.venue}:${d.id}`;
+    lp.liquidity.set(k, (lp.liquidity.get(k) ?? 0n) + 1000n);
+  }
 }

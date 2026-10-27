@@ -60,8 +60,8 @@ const { version } = JSON.parse(readFileSync(join(__dirname, '..', '..', 'package
 const GOATLP_INSTRUCTIONS = 'Goat LP (Uniswap v3 and v4 liquidity on Robinhood Chain, chain 4663): goatlp_pools, goatlp_pool, '
   + 'goatlp_positions and goatlp_position show pools with their APR, TVL and volume, positions, and the auto-compound, auto-range '
   + `and auto-exit rules; they are read-only. ${GOATLP_WARNING}`;
-const GOATLP_WRITE_INSTRUCTIONS = 'The Goat LP write tools (goatlp_set_auto_range, goatlp_set_auto_exit, goatlp_set_auto_compound, '
-  + 'goatlp_stop_automation) act from the configured wallet in two steps. Called without execute, a tool returns a plan and a planId and '
+const GOATLP_WRITE_INSTRUCTIONS = 'The Goat LP write tools (goatlp_add_liquidity, goatlp_set_auto_range, goatlp_set_auto_exit, '
+  + 'goatlp_set_auto_compound, goatlp_stop_automation) act from the configured wallet in two steps. Called without execute, a tool returns a plan and a planId and '
   + 'sends nothing: show the user every step of the plan (contracts, addresses, settings, fees, signatures, simulation result) and ask '
   + 'for an explicit yes. Only then call the same tool with the same inputs plus execute: true and the planId. A plan is single use and '
   + 'expires after 10 minutes. Never execute a plan the user has not seen, and never retry a failed execute without asking the user.';

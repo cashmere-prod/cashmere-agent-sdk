@@ -1,13 +1,15 @@
 // The two-step flow of every Goat LP write tool. Without `execute: true` a tool returns a plan (every transaction and
 // signature in order, with what it does, and the result of simulating it) and a planId; nothing is sent. With
 // `execute: true` and that planId (single use, valid for 10 minutes, the same inputs) the tool builds the plan again from
-// fresh chain reads, checks that it is the same plan, and only then sends it, one step at a time:
+// fresh chain reads, checks that it is the same plan, and only then sends it, one step at a time. The rebuild keeps the
+// plan's basis (its clock, and for a deposit the pool price it was sized at), so a price that moved inside the deposit's
+// limits does not change the plan; every check still reads the chain again.
 //   transaction: fresh reads and the decode check -> eth_call simulation (refused on revert) -> send -> receipt -> read-back
 //   signatures:  the signed-message check on every message -> sign (the signatures stay in memory)
 //   hand-over:   the signed messages go to the keeper store
 import { decodeErrorResult, keccak256, stringToHex, type Abi, type Address, type Hex } from 'viem';
 import { GOAT_ERROR_ABIS } from './abis';
-import { txUrl, type GoatChain, type GoatSigner } from './chain';
+import { txUrl, type GoatChain, type GoatSigner, type TxReceipt } from './chain';
 import { PLAN_TTL_MS } from './constants';
 import { ERROR_TEXT, TX_FAILED } from './copy';
 
@@ -23,8 +25,12 @@ export interface TxStep {
   precheck: () => Promise<string | null>;
   /** read-back after the receipt: what is not as expected, or null */
   verify?: () => Promise<string | null>;
-  /** run after a confirmed receipt (bookkeeping such as the add-liquidity total) */
-  after?: () => void;
+  /** right before the transaction is signed and sent (bookkeeping such as the add-liquidity total) */
+  onSend?: () => void;
+  /** after a receipt that says the transaction reverted */
+  onRevert?: () => void;
+  /** after a confirmed receipt */
+  after?: (receipt: TxReceipt) => void;
 }
 export interface WorkStep {
   kind: 'sign' | 'post';
@@ -43,15 +49,23 @@ export interface BuiltPlan {
   steps: PlanStep[];
   /** run once every step is done: the state read back from the chain */
   readBack?: () => Promise<Record<string, unknown>>;
+  /** what the rebuild at execute keeps from this plan besides its clock (a deposit: the pool price it was sized at) */
+  basis?: Record<string, unknown>;
+  /** more of the plan's identity than its steps (such as what the user must acknowledge) */
+  fingerprintExtra?: string;
 }
 
-/** A plan's identity: the exact transactions and what each signing or hand-over step covers */
-export function fingerprintOf(steps: readonly PlanStep[]): Hex {
+/** The plan's clock (unix seconds) and what else the rebuild keeps */
+export interface PlanBasis { nowSec: number; [key: string]: unknown }
+
+/** A plan's identity: the exact transactions, what each signing or hand-over step covers, and the extra text */
+export function fingerprintOf(steps: readonly PlanStep[], extra = ''): Hex {
   const parts = steps.map((s) => (s.kind === 'tx' ? `tx|${s.to.toLowerCase()}|${s.data.toLowerCase()}|${s.value}` : `${s.kind}|${s.key}`));
+  if (extra) parts.push(`extra|${extra}`);
   return keccak256(stringToHex(parts.join('\n')));
 }
 
-interface PlanRecord { id: string; tool: string; inputKey: string; createdAtMs: number; nowSec: number; fingerprint: Hex; used: boolean }
+interface PlanRecord { id: string; tool: string; inputKey: string; createdAtMs: number; basis: PlanBasis; fingerprint: Hex; used: boolean }
 
 /** Canonical JSON of the inputs (keys sorted, undefined dropped), the plan's "same inputs" test */
 export function inputKeyOf(input: Record<string, unknown>): string {
@@ -68,10 +82,10 @@ export class PlanStore {
   private plans = new Map<string, PlanRecord>();
   constructor(private readonly now: () => number) {}
 
-  create(tool: string, inputKey: string, nowSec: number, fingerprint: Hex): PlanRecord {
+  create(tool: string, inputKey: string, basis: PlanBasis, fingerprint: Hex): PlanRecord {
     for (const [k, p] of this.plans) if (this.now() - p.createdAtMs > PLAN_TTL_MS) this.plans.delete(k);
     const id = keccak256(stringToHex(`${tool}|${inputKey}|${this.now()}|${Math.random()}`)).slice(2, 26);
-    const rec: PlanRecord = { id, tool, inputKey, createdAtMs: this.now(), nowSec, fingerprint, used: false };
+    const rec: PlanRecord = { id, tool, inputKey, createdAtMs: this.now(), basis, fingerprint, used: false };
     this.plans.set(id, rec);
     return rec;
   }
@@ -156,15 +170,19 @@ export async function executeSteps(chain: GoatChain, signer: GoatSigner, steps: 
     const why = await simulate(chain, signer.address, s);
     if (why) throw new Error(`Not sent: step ${step} (${s.label}) would revert: ${why}${doneText()}`);
     let hash: Hex;
+    s.onSend?.();
     try { hash = await signer.sendTransaction({ to: s.to, data: s.data, value: s.value }); } catch (e) {
       throw new Error(`Step ${step} (${s.label}) was not sent: ${revertText(e)}${doneText()}`);
     }
-    let status: 'success' | 'reverted';
-    try { status = (await chain.waitReceipt(hash)).status; } catch (e) {
+    let receipt: TxReceipt;
+    try { receipt = await chain.waitReceipt(hash); } catch (e) {
       throw new Error(`Step ${step} (${s.label}) was sent (${hash}, ${txUrl(hash)}) but its receipt could not be read: ${revertText(e)}. Check it on the explorer before trying again.${doneText()}`);
     }
-    if (status !== 'success') throw new Error(`Step ${step} (${s.label}): ${TX_FAILED} ${hash} (${txUrl(hash)}).${doneText()}`);
-    s.after?.();
+    if (receipt.status !== 'success') {
+      s.onRevert?.();
+      throw new Error(`Step ${step} (${s.label}): ${TX_FAILED} ${hash} (${txUrl(hash)}).${doneText()}`);
+    }
+    s.after?.(receipt);
     const problem = s.verify ? await s.verify().catch((e: unknown) => `the read-back failed: ${revertText(e)}`) : null;
     done.push({ step, action: s.label, txHash: hash, explorer: txUrl(hash), status: 'confirmed', ...(problem ? { readBack: problem } : {}) });
   }

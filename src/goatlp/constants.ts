@@ -40,7 +40,7 @@ export const GOAT_TREASURY: Address = '0x2bf95e5f307FB84e19851865193a14DaB01A561
 
 export type PinKey =
   | 'autoCompoundV3' | 'autoCompoundV4' | 'rangeExitV3' | 'exitV3' | 'rangeExitV4' | 'engine' | 'compoundorV4'
-  | 'registry' | 'pairTable' | 'priceAnchor' | 'npm' | 'posm' | 'permit2' | 'multicall3';
+  | 'registry' | 'pairTable' | 'priceAnchor' | 'npm' | 'posm' | 'permit2' | 'multicall3' | 'poolManager' | 'v3Factory';
 
 export interface Pin { name: string; address: Address; codehash: Hex }
 
@@ -63,6 +63,8 @@ export const PINS: Readonly<Record<PinKey, Pin>> = Object.freeze({
   posm: { name: 'Uniswap v4 PositionManager', address: POSM, codehash: '0xc873e135dc9aaec88489cfbad146b4cb49d6a32e0d80326377784b7ba17670b2' },
   permit2: { name: 'Permit2', address: PERMIT2, codehash: '0x5208783f52488f7d3493e5e38311ab707c1d75457fe472a19b0b4d57d66a7fca' },
   multicall3: { name: 'Multicall3', address: MULTICALL3, codehash: '0xd5c15df687b16f2ff992fc8d767b4216323184a2bbc6ee2f9c398c318e770891' },
+  poolManager: { name: 'Uniswap v4 PoolManager', address: POOL_MANAGER, codehash: '0xbd3881180b547f5fe817545743cfb4343e96b1bc6640dcd70c106b0066e95626' },
+  v3Factory: { name: 'Uniswap v3 Factory', address: V3_FACTORY, codehash: '0xec72b1abd1f2faee020cfea9c646bd8994f9fb389054f6e574f103a895091739' },
 });
 
 /** The pin of an address, or null when the address is not one of the pinned contracts. */

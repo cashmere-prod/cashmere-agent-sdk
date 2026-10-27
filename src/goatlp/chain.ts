@@ -24,8 +24,13 @@ export interface GoatChain {
   call(tx: { from: Address; to: Address; data: Hex; value?: bigint }): Promise<Hex>;
   /** unix seconds of the latest block */
   blockTimestamp(): Promise<number>;
-  waitReceipt(hash: Hex): Promise<{ status: 'success' | 'reverted'; blockNumber: bigint }>;
+  /** the ETH balance of an address, in wei */
+  balance(address: Address): Promise<bigint>;
+  waitReceipt(hash: Hex): Promise<TxReceipt>;
 }
+
+export interface TxLog { address: Address; topics: readonly Hex[]; data: Hex }
+export interface TxReceipt { status: 'success' | 'reverted'; blockNumber: bigint; logs?: readonly TxLog[] }
 
 export interface TypedDataToSign {
   domain: { name: string; chainId: number; verifyingContract: Address };
@@ -70,9 +75,10 @@ export function viemChain(rpcUrl: string = DEFAULT_ROBINHOOD_RPC_URL): GoatChain
       return (r.data ?? '0x') as Hex;
     },
     blockTimestamp: async () => Number((await client.getBlock({ blockTag: 'latest' })).timestamp),
+    balance: (address) => client.getBalance({ address }),
     waitReceipt: async (hash) => {
       const r = await client.waitForTransactionReceipt({ hash, timeout: 180_000 });
-      return { status: r.status, blockNumber: r.blockNumber };
+      return { status: r.status, blockNumber: r.blockNumber, logs: r.logs.map((l) => ({ address: l.address, topics: l.topics as Hex[], data: l.data })) };
     },
   };
 }

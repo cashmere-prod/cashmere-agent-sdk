@@ -41,7 +41,7 @@ function json(result: Awaited<ReturnType<Client['callTool']>>) {
 }
 
 const GOATLP_READ = ['goatlp_pool', 'goatlp_pools', 'goatlp_position', 'goatlp_positions'];
-const GOATLP_WRITE = ['goatlp_set_auto_compound', 'goatlp_set_auto_exit', 'goatlp_set_auto_range', 'goatlp_stop_automation'];
+const GOATLP_WRITE = ['goatlp_add_liquidity', 'goatlp_set_auto_compound', 'goatlp_set_auto_exit', 'goatlp_set_auto_range', 'goatlp_stop_automation'];
 
 async function toolNames(client: Client): Promise<string[]> {
   const { tools } = await client.listTools();

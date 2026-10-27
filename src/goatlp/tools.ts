@@ -4,8 +4,10 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
 import { planSetAutomation, planStop, type SetAutomationInput } from './automation';
+import { DEPOSIT_SLIPPAGE_MAX_BPS, DEPOSIT_SLIPPAGE_MIN_BPS } from './constants';
 import type { GoatLpContext } from './context';
-import { PlanStore, executeSteps, fingerprintOf, inputKeyOf, planSimulation, type BuiltPlan } from './plans';
+import { planAddLiquidity, type AddLiquidityInput, type DepositLedger } from './deposit';
+import { PlanStore, executeSteps, fingerprintOf, inputKeyOf, planSimulation, type BuiltPlan, type PlanBasis } from './plans';
 import { poolTool, poolsTool, positionTool, positionsTool } from './read';
 
 export const GOATLP_READ_TOOLS = ['goatlp_pools', 'goatlp_pool', 'goatlp_positions', 'goatlp_position'] as const;
@@ -94,7 +96,7 @@ export function registerGoatLpReadTools(server: McpServer, ctx: GoatLpContext, r
 
 // ------------------------------------------------------------------ write tools
 
-export const GOATLP_WRITE_TOOLS = ['goatlp_set_auto_range', 'goatlp_set_auto_exit', 'goatlp_set_auto_compound', 'goatlp_stop_automation'] as const;
+export const GOATLP_WRITE_TOOLS = ['goatlp_add_liquidity', 'goatlp_set_auto_range', 'goatlp_set_auto_exit', 'goatlp_set_auto_compound', 'goatlp_stop_automation'] as const;
 
 const TWO_STEP = 'Two steps: without execute it returns a plan (every transaction and signature in order, with contracts, addresses, '
   + 'settings, fees and the simulation result) and a planId, and sends nothing. Show the plan to the user; only after the user confirms it, '
@@ -119,16 +121,17 @@ export function registerGoatLpWriteTools(server: McpServer, ctx: GoatLpContext, 
   const run = goatRun(redact);
   const store = new PlanStore(ctx.now);
 
-  const flow = <I extends { execute?: boolean; planId?: string }>(tool: string, build: (input: I, nowSec: number) => Promise<BuiltPlan>) =>
+  const flow = <I extends { execute?: boolean; planId?: string }>(tool: string, build: (input: I, basis: PlanBasis) => Promise<BuiltPlan>) =>
     (input: I, extra: { signal: AbortSignal }): Promise<CallToolResult> => {
       const signer = ctx.signer;
       if (!input.execute) {
         return run(async () => {
           if (!signer) throw new Error('Not planned: this server has no wallet configured.');
           const nowSec = ctx.nowSec();
-          const plan = await build(input, nowSec);
+          const plan = await build(input, { nowSec });
           await planSimulation(ctx.chain, signer.address, plan.steps);
-          const rec = store.create(tool, inputKeyOf(input as Record<string, unknown>), nowSec, fingerprintOf(plan.steps));
+          const basis: PlanBasis = { ...plan.basis, nowSec };
+          const rec = store.create(tool, inputKeyOf(input as Record<string, unknown>), basis, fingerprintOf(plan.steps, plan.fingerprintExtra));
           const expiresAt = store.expiresAt(rec);
           return {
             planId: rec.id, expiresAt, wallet: signer.address, ...plan.view,
@@ -143,8 +146,8 @@ export function registerGoatLpWriteTools(server: McpServer, ctx: GoatLpContext, 
         if (!signer) throw new Error('Not sent: this server has no wallet configured.');
         if (!input.planId) throw new Error('Not sent: execute: true needs the planId of the plan the user confirmed. Call without execute first.');
         const rec = store.take(input.planId, tool, inputKeyOf(input as Record<string, unknown>));
-        const plan = await build(input, rec.nowSec);
-        if (fingerprintOf(plan.steps) !== rec.fingerprint) {
+        const plan = await build(input, rec.basis);
+        if (fingerprintOf(plan.steps, plan.fingerprintExtra) !== rec.fingerprint) {
           throw new Error('Not sent: the plan is no longer the same as the one shown (the chain changed since, such as a price, a permission or a signed-message slot). Call without execute for a new plan and show it to the user.');
         }
         const steps = await executeSteps(ctx.chain, signer, plan.steps, extra.signal);
@@ -175,7 +178,7 @@ export function registerGoatLpWriteTools(server: McpServer, ctx: GoatLpContext, 
       ...planFields,
     },
     ...writeMeta,
-  }, flow('goatlp_set_auto_range', (i: SetToolInput, nowSec) => planSetAutomation(ctx, { ...i, kind: 'range' }, nowSec)));
+  }, flow('goatlp_set_auto_range', (i: SetToolInput, b) => planSetAutomation(ctx, { ...i, kind: 'range' }, b.nowSec)));
 
   const lowerIn = z.object({
     tick: z.number().int().optional().describe('The exit level as a tick'),
@@ -204,11 +207,11 @@ export function registerGoatLpWriteTools(server: McpServer, ctx: GoatLpContext, 
       ...planFields,
     },
     ...writeMeta,
-  }, flow('goatlp_set_auto_exit', (i: ExitToolInput, nowSec) => planSetAutomation(ctx, {
+  }, flow('goatlp_set_auto_exit', (i: ExitToolInput, b) => planSetAutomation(ctx, {
     ...i, kind: 'exit',
     lower: i.lower ? { tick: i.lower.tick, pctBeyondRange: i.lower.pctBelowRange, swap: i.lower.swap } : undefined,
     upper: i.upper ? { tick: i.upper.tick, pctBeyondRange: i.upper.pctAboveRange, swap: i.upper.swap } : undefined,
-  }, nowSec)));
+  }, b.nowSec)));
 
   server.registerTool('goatlp_set_auto_compound', {
     title: 'Goat LP auto-compound',
@@ -230,7 +233,7 @@ export function registerGoatLpWriteTools(server: McpServer, ctx: GoatLpContext, 
       ...planFields,
     },
     ...writeMeta,
-  }, flow('goatlp_set_auto_compound', (i: SetToolInput, nowSec) => planSetAutomation(ctx, { ...i, kind: 'compound' }, nowSec)));
+  }, flow('goatlp_set_auto_compound', (i: SetToolInput, b) => planSetAutomation(ctx, { ...i, kind: 'compound' }, b.nowSec)));
 
   server.registerTool('goatlp_stop_automation', {
     title: 'Stop a Goat LP automation',
@@ -241,7 +244,44 @@ export function registerGoatLpWriteTools(server: McpServer, ctx: GoatLpContext, 
     inputSchema: { venue, id, kind: z.enum(['compound', 'range', 'exit']).describe('The automation to stop'), ...planFields },
     ...writeMeta,
   }, flow<StopToolInput>('goatlp_stop_automation', (i) => planStop(ctx, i)));
+
+  // USD the deposits sent, or may have sent, while the server runs (CASHMERE_GOATLP_MAX_TOTAL_USD)
+  const ledger: DepositLedger = { totalUsd: 0 };
+  const { maxDepositUsd, maxTotalUsd } = ctx.settings;
+  const limits = (maxDepositUsd === undefined ? '' : ` It deposits at most ${maxDepositUsd} USD per call.`)
+    + (maxTotalUsd === undefined ? '' : ` It deposits at most ${maxTotalUsd} USD in total while it runs.`);
+  const amount = z.string().max(80).regex(/^\d+(\.\d+)?$/, 'a plain decimal number such as 1.5');
+
+  server.registerTool('goatlp_add_liquidity', {
+    title: 'Goat LP add liquidity',
+    description: 'Add liquidity on Robinhood Chain from the configured wallet, with no swap: open a new Uniswap v3 or v4 position (pool and '
+      + 'range) or add to a position the wallet owns (id). Amounts are in token units: amount0 for the pool\'s token0 and amount1 for token1, '
+      + 'as goatlp_pool lists them; leave one out to match the other at the pool price. What the range does not need stays in the wallet. '
+      + 'The range of a new position: tickLower and tickUpper, rangePct (percent below and above the price), or fullRange. v3: each token is '
+      + 'approved to the position manager for exactly this deposit; payWithEth pays the WETH side with ETH (unused ETH comes back). v4: pools '
+      + 'without a hook only; tokens go through Permit2 with an exact allowance that lasts 30 minutes; native ETH goes with the call and unused '
+      + 'ETH comes back. Refused: a token that copies an official stock ticker, a token that takes a fee when it moves, and a pool price more '
+      + `than 5% away from Chainlink.${limits} ${TWO_STEP}`,
+    inputSchema: {
+      venue,
+      id: positionId.optional().describe('Add to this position (the configured wallet must own it)'),
+      pool: z.string().max(80).optional().describe('Open a new position in this pool: v3 the pool address, v4 the 32-byte pool id'),
+      tickLower: z.number().int().optional().describe('New position: the lower tick (a multiple of the pool\'s tick spacing)'),
+      tickUpper: z.number().int().optional().describe('New position: the upper tick (a multiple of the pool\'s tick spacing)'),
+      rangePct: z.number().positive().lt(100).optional().describe('New position: the range this many percent below and above the pool price'),
+      fullRange: z.boolean().optional().describe('New position: the full price range'),
+      amount0: amount.optional().describe('Amount of token0 in token units, such as 0.05'),
+      amount1: amount.optional().describe('Amount of token1 in token units, such as 100'),
+      slippageBps: z.number().int().min(DEPOSIT_SLIPPAGE_MIN_BPS).max(DEPOSIT_SLIPPAGE_MAX_BPS).optional()
+        .describe('v3 only: the price move the minimums allow, in bps (default 100 = 1%, at most 300)'),
+      payWithEth: z.boolean().optional().describe('v3 only: pay the WETH side with ETH'),
+      ...planFields,
+    },
+    ...writeMeta,
+  }, flow<AddToolInput>('goatlp_add_liquidity', (i, b) => planAddLiquidity(ctx, i, b, ledger)));
 }
+
+type AddToolInput = AddLiquidityInput & { execute?: boolean; planId?: string };
 
 type SetToolInput = Omit<SetAutomationInput, 'kind'> & { execute?: boolean; planId?: string };
 type StopToolInput = { venue: 'v3' | 'v4'; id: string; kind: 'compound' | 'range' | 'exit'; execute?: boolean; planId?: string };

@@ -55,7 +55,7 @@ test('the write tools are listed only with an EVM key outside read-only mode, de
   const s = setup();
   const client = await connect(s.options);
   const { tools } = await client.listTools();
-  for (const name of ['goatlp_set_auto_range', 'goatlp_set_auto_exit', 'goatlp_set_auto_compound', 'goatlp_stop_automation']) {
+  for (const name of ['goatlp_add_liquidity', 'goatlp_set_auto_range', 'goatlp_set_auto_exit', 'goatlp_set_auto_compound', 'goatlp_stop_automation']) {
     const t = tools.find((x) => x.name === name)!;
     assert.ok(t, name);
     assert.equal(t.annotations?.readOnlyHint, false);
@@ -69,7 +69,7 @@ test('the write tools are listed only with an EVM key outside read-only mode, de
   for (const options of [{ ...s.options, readOnly: true }, { ...s.options, config: { sui: { privateKey: TEST_KEY } } }]) {
     const c = await connect(options);
     const names = (await c.listTools()).tools.map((t) => t.name);
-    assert.ok(!names.some((n) => n.startsWith('goatlp_set') || n === 'goatlp_stop_automation'), JSON.stringify(names));
+    assert.ok(!names.some((n) => n.startsWith('goatlp_set') || n === 'goatlp_stop_automation' || n === 'goatlp_add_liquidity'), JSON.stringify(names));
     assert.match(c.getInstructions()!, /Goat LP write tools are off because/);
     await c.close();
   }
