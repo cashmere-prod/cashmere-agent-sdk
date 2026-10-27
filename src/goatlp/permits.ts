@@ -104,6 +104,34 @@ export function revokeSet(x: { base: bigint; sessions: readonly SessionRecord[];
   return out;
 }
 
+const highestUsedBit = (bm: bigint): number => { let b = -1; for (let i = 0; i < 256 && bm >> BigInt(i) !== 0n; i++) if (isUsed(bm, i)) b = i; return b; };
+
+/**
+ * The sessions a stop cancels: the union of the keeper store's sessions, this server's record and the chain's scan. A word in
+ * both records keeps the larger size. They disagree when the two records list different words or sizes, when a recorded word
+ * shows a used bit at or past its size (it then counts as a session of 30), or when the scan shows a word in use that no
+ * record has; then, as without any record, every word of the scan (up to and including its first unused one) counts as a
+ * session of 30. `bitmaps` holds the scan's words and every recorded word.
+ */
+export function sessionUnion(base: bigint, x: { store: readonly SessionRecord[]; local: readonly SessionRecord[]; scanWords: readonly bigint[]; bitmaps: ReadonlyMap<string, bigint> }): { sessions: SessionRecord[]; source: 'records' | 'union' | 'scan' } {
+  const store = ownSessions(base, x.store), local = ownSessions(base, x.local);
+  const byWord = new Map<string, SessionRecord>();
+  for (const s of [...store, ...local]) {
+    const k = String(s.word), e = byWord.get(k);
+    byWord.set(k, e ? { word: s.word, size: Math.max(e.size, s.size), deadline: e.deadline > s.deadline ? e.deadline : s.deadline } : { ...s });
+  }
+  const key = (l: readonly SessionRecord[]) => new Set(l.map((s) => `${s.word}:${s.size}`));
+  const ks = key(store), kl = key(local);
+  let disagree = store.length > 0 && local.length > 0 && (ks.size !== kl.size || [...ks].some((k) => !kl.has(k)));
+  for (const s of byWord.values()) {
+    if (highestUsedBit(x.bitmaps.get(String(s.word)) ?? 0n) >= s.size) { s.size = MAX_RUNS_PER_SESSION; disagree = true; }
+  }
+  if (x.scanWords.some((w) => !byWord.has(String(w)) && (x.bitmaps.get(String(w)) ?? 0n) !== 0n)) disagree = true;
+  const none = byWord.size === 0;
+  if (none || disagree) for (const w of x.scanWords) if (isSessionWord(base, w) && !byWord.has(String(w))) byWord.set(String(w), { word: w, size: MAX_RUNS_PER_SESSION, deadline: 0n });
+  return { sessions: [...byWord.values()], source: none ? 'scan' : disagree ? 'union' : 'records' };
+}
+
 /** The scan fallback: base, base + 1, ... up to and including the first all-zero word. */
 export async function scanSessionWords(read: ReadNonces, x: { owner: Address; gac4: Address; tokenId: bigint }): Promise<{ words: bigint[]; bitmaps: Map<string, bigint> }> {
   const base = permitWord(x.gac4, x.tokenId);

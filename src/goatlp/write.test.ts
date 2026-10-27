@@ -14,14 +14,14 @@ import {
 } from './constants';
 import { nonceOf, permitWord } from './permits';
 import {
-  FOREIGN_APP, NOW_SEC, OTHER, TEST_ACCOUNT, TEST_KEY, V3_POS, V4_POS, apiWorld, writeWorld, type FakeAnswer,
+  FOREIGN_APP, NOW_SEC, OTHER, TEST_ACCOUNT, TEST_KEY, V3_POS, V4_POS, apiWorld, fixture, writeWorld, type FakeAnswer,
 } from './__fixtures__/kit';
 
 const ZERO = '0x0000000000000000000000000000000000000000';
 
 function setup(o: { v4Range?: [number, number]; api?: Record<string, FakeAnswer | ((init: { method: string; headers: Record<string, string>; body?: string }) => FakeAnswer)>; options?: Partial<CashmereMcpServerOptions> } = {}) {
   const w = writeWorld({ v4Range: o.v4Range ?? [-199200, -198600] });
-  const api = apiWorld({ 'POST /automation/permits': { status: 200, body: { ok: true } }, [`DELETE /automation/permits/${V4_POS}`]: { status: 200, body: { ok: true } }, ...o.api });
+  const api = apiWorld({ 'POST /automation/permits': { status: 200, body: { ok: true } }, [`DELETE /automation/permits/${V4_POS}`]: { status: 200, body: { deleted: true } }, ...o.api });
   let clock = NOW_SEC * 1000;
   const goatApi = new GoatApi({ fetch: api.fetch, now: () => clock, sleep: async () => {} });
   const options: CashmereMcpServerOptions = {
@@ -268,7 +268,8 @@ test('v4 auto-compound: one signing session of N Permit messages, checked and si
   assert.equal(s.signer.sent.length, 1);
   const c = fn(gac4Abi, s.signer.sent[0].data);
   assert.equal(s.signer.sent[0].to, GOAT_AUTO_COMPOUND_V4);
-  assert.deepEqual(c.args[1], { enabled: true, claimOnly: false, allowStandingApproval: false, maxSlippageBps: 100, minInterval: 86400, lastRunAt: 0, minLiquidityDelta: 0n });
+  assert.deepEqual(c.args[1], { enabled: true, claimOnly: false, allowStandingApproval: false, maxSlippageBps: 110, minInterval: 86400, lastRunAt: 0, minLiquidityDelta: 0n },
+    "with no input, the price protection the pool's hook needs (its 0.60% fee + 0.5%) instead of the 1% default");
   const posts = s.api.requests.filter((r) => r.method === 'POST');
   assert.equal(posts.length, 1, 'one POST per session');
   assert.equal(posts[0].url, 'https://api.cashmere.exchange/automation/permits');
@@ -424,5 +425,147 @@ test('errors never carry the private key, and execute calls share the one write 
     call(c2, 'goatlp_set_auto_compound', { venue: 'v3', id: String(V3_POS), execute: true, planId: pb.planId }),
   ]);
   assert.deepEqual(order.map((x) => x.split(' ')[0]), ['start', 'end', 'start', 'end', 'start', 'end', 'start', 'end'], 'one transaction at a time');
+  await c2.close();
+});
+
+// ------------------------------------------------------------------ the keeper's size limit, the served switches, stop details
+
+const statusWith = (pairs: unknown[]) => ({ body: { version: 1, updatedAt: NOW_SEC - 60, positions: [], pairs: { version: 1, rows: pairs } }, headers: { 'cache-control': 'public, max-age=30' } });
+const ethUsdgRow = (state: 'limited' | 'waiting') => ({ venue: 'v4', token0: ZERO, token1: '0x5fc5360d0400a0fd4f2af552add042d716f1d168', state, maxRunUsd: state === 'limited' ? 5000 : 0, reason: 'price-check-depth', eta: null });
+const SIZE_LINE = "Larger automatic moves wait until this pair's price check is deeper. Smaller ones still run. The exit without a swap is not affected.";
+
+test("the keeper's size limit: a limited pair shows its line in auto-range and swap-exit plans; a waiting pair refuses them, withdraw only goes through", async () => {
+  const s = setup({ api: { '/automation/status': statusWith([ethUsdgRow('limited')]) } });
+  let client = await connect(s.options);
+  const id = String(V4_POS);
+  const range = await call(client, 'goatlp_set_auto_range', { venue: 'v4', id });
+  assert.ok((range.notes as string[]).includes(SIZE_LINE), JSON.stringify(range.notes));
+  const swapExit = await call(client, 'goatlp_set_auto_exit', { venue: 'v4', id, upper: { swap: true } });
+  assert.ok((swapExit.notes as string[]).includes(SIZE_LINE));
+  const withdraw = await call(client, 'goatlp_set_auto_exit', { venue: 'v4', id, upper: {} });
+  assert.ok(!((withdraw.notes as string[] | undefined) ?? []).includes(SIZE_LINE), 'a withdraw-only exit is not affected');
+  await client.close();
+
+  const w = setup({ api: { '/automation/status': statusWith([ethUsdgRow('waiting')]) } });
+  client = await connect(w.options);
+  assert.match(String((await call(client, 'goatlp_set_auto_range', { venue: 'v4', id })).error), /Auto-range is not offered for this position: Automatic moves on this pair wait until its price check is deeper/);
+  assert.match(String((await call(client, 'goatlp_set_auto_exit', { venue: 'v4', id, lower: { swap: true } })).error), /Swap exits on this pair wait until its price check is deeper.*Set swap: false on that side/);
+  const ok = await call(client, 'goatlp_set_auto_exit', { venue: 'v4', id, lower: { swap: false } });
+  assert.equal(ok.error, undefined, String(ok.error));
+  assert.equal(w.signer.sent.length, 0);
+  // the read tool says it too
+  const pos = await call(client, 'goatlp_position', { venue: 'v4', id });
+  const can = (pos.chain as Record<string, Record<string, Record<string, unknown>>>).canTurnOn;
+  assert.equal(can.autoRange.offered, false);
+  assert.match(String(can.autoRange.why), /Automatic moves on this pair wait/);
+  await client.close();
+});
+
+test('a switch served in /v2/automation/policy turns an automation off for these tools too; an unreadable policy refuses turning on, never a stop', async () => {
+  const policy = { ...(fixture('automation-policy.json') as Record<string, unknown>), live: { v4: { range: false } } };
+  const s = setup({ api: { '/v2/automation/policy': { body: policy } } });
+  let client = await connect(s.options);
+  assert.match(String((await call(client, 'goatlp_set_auto_range', { venue: 'v4', id: String(V4_POS) })).error), /Auto-range on Uniswap v4: This automation is switched off in the Goat LP app right now\./);
+  const exit = await call(client, 'goatlp_set_auto_exit', { venue: 'v4', id: String(V4_POS), lower: {} });
+  assert.equal(exit.error, undefined, String(exit.error));
+  const pos = await call(client, 'goatlp_position', { venue: 'v4', id: String(V4_POS) });
+  assert.equal((pos.chain as Record<string, Record<string, Record<string, unknown>>>).canTurnOn.autoRange.offered, false);
+  await client.close();
+
+  const u = setup({ api: { '/v2/automation/policy': { status: 503, body: { error: 'down' } } } });
+  u.st.steward.set(V4_POS, { mode: 1, triggerTicks: 102, slippageBps: 25, minInterval: 21600, budget: 20, lastRunAt: 0, flags: 0, lowerTrigger: 0, upperTrigger: 0, pairEpoch: 1, maxSwapFeePips: 10000 });
+  u.st.stewardOwner.set(V4_POS, TEST_ACCOUNT);
+  client = await connect(u.options);
+  assert.match(String((await call(client, 'goatlp_set_auto_compound', { venue: 'v3', id: String(V3_POS) })).error), /couldn't read the automation switches/);
+  const stop = await call(client, 'goatlp_stop_automation', { venue: 'v4', id: String(V4_POS), kind: 'range' });
+  assert.equal(stop.error, undefined, String(stop.error));
+  await client.close();
+});
+
+test('stop: an approval for all positions to the automation is reported as still on, and never changed', async () => {
+  const s = setup();
+  s.st.steward.set(V4_POS, { mode: 2, triggerTicks: 0, slippageBps: 25, minInterval: 0, budget: 0, lastRunAt: 0, flags: 1, lowerTrigger: -199500, upperTrigger: 0, pairEpoch: 1, maxSwapFeePips: 10000 });
+  s.st.stewardOwner.set(V4_POS, TEST_ACCOUNT);
+  s.st.forAll.add(`v4:${TEST_ACCOUNT.toLowerCase()}:${GOAT_V4_STEWARD_ENGINE.toLowerCase()}`);
+  const client = await connect(s.options);
+  const plan = await call(client, 'goatlp_stop_automation', { venue: 'v4', id: String(V4_POS), kind: 'exit' });
+  assert.match(String(plan.allowForAll), /^An approval for all positions to GoatV4StewardEngine \(0xD12D46c9d3B1FE463895A20daD19F3cae5584892\) is still on\. This tool never changes it; it can be removed in the Goat LP app\.$/);
+  await call(client, 'goatlp_stop_automation', { venue: 'v4', id: String(V4_POS), kind: 'exit', execute: true, planId: plan.planId });
+  assert.ok(s.signer.sent.length >= 1);
+  assert.ok(s.signer.sent.every((t) => !NEVER.includes(t.data.slice(0, 10) as Hex)), 'setApprovalForAll is never sent');
+  assert.ok(s.st.forAll.size === 1, 'still on');
+  await client.close();
+});
+
+test('stop of v4 auto-compound cancels the union of the keeper store, this server\'s record and the chain when they disagree', async () => {
+  const word = permitWord(GOAT_AUTO_COMPOUND_V4, V4_POS);
+  // the store holds what it was handed: nothing before the turn-on, then the session of this server (they agree)
+  let held: unknown[] = [];
+  const s = setup({ api: { [`/automation/permits/${V4_POS}`]: () => ({ body: { sessions: held }, headers: { 'cache-control': 'no-store' } }) } });
+  const client = await connect(s.options);
+  const args = { venue: 'v4', id: String(V4_POS), runsToSign: 4, horizonDays: 7 };
+  const on = await call(client, 'goatlp_set_auto_compound', args);
+  assert.equal(on.error, undefined, String(on.error));
+  const done = await call(client, 'goatlp_set_auto_compound', { ...args, execute: true, planId: on.planId });
+  assert.equal(done.error, undefined, String(done.error));
+  held = [{ word: word.toString(), size: 4, deadline: String(NOW_SEC + 7 * 86_400) }];
+  // one run used the first message; the chain also shows the next word in use, which no record has
+  const me = TEST_ACCOUNT.toLowerCase();
+  s.st.nonces.set(`${me}:${word}`, 0b1n);
+  s.st.nonces.set(`${me}:${word + 1n}`, 0b1n);
+  const plan = await call(client, 'goatlp_stop_automation', { venue: 'v4', id: String(V4_POS), kind: 'compound' });
+  assert.equal(plan.error, undefined, String(plan.error));
+  assert.ok((plan.removes as string[]).some((r) => /do not agree: every unused message any of them shows is cancelled \(62\)/.test(r)), JSON.stringify(plan.removes));
+  const sentBefore = s.signer.sent.length;
+  await call(client, 'goatlp_stop_automation', { venue: 'v4', id: String(V4_POS), kind: 'compound', execute: true, planId: plan.planId });
+  const revoked = (fn(posmAbi, s.signer.sent[sentBefore + 1].data).args[0] as Hex[]).map((d) => fn(posmAbi, d).args[0] as bigint);
+  const want = [...[1, 2, 3].map((b) => nonceOf(word, b)), ...Array.from({ length: 29 }, (_, i) => nonceOf(word + 1n, i + 1)), ...Array.from({ length: 30 }, (_, i) => nonceOf(word + 2n, i))];
+  assert.deepEqual(revoked, want);
+  await client.close();
+});
+
+test('stop of v4 auto-compound asks the keeper store to drop the messages only once the chain shows the stop; a "kept" answer is reported, not an error', async () => {
+  const word = permitWord(GOAT_AUTO_COMPOUND_V4, V4_POS);
+  const sessions = { body: { sessions: [{ word: word.toString(), size: 6, deadline: String(NOW_SEC + 86_400) }] }, headers: { 'cache-control': 'no-store' } };
+  const on = (st: ReturnType<typeof setup>['st']) => { st.gac4.set(V4_POS, [true, false, false, 100, 86400, 0, 0n]); st.gac4Owner.set(V4_POS, TEST_ACCOUNT); };
+  let askedAfter = -1;
+  const s = setup({ api: { [`/automation/permits/${V4_POS}`]: sessions, [`DELETE /automation/permits/${V4_POS}`]: () => { askedAfter = s.signer.sent.length; return { status: 200, body: { deleted: false, reason: 'rule-on' } }; } } });
+  on(s.st);
+  let client = await connect(s.options);
+  let plan = await call(client, 'goatlp_stop_automation', { venue: 'v4', id: String(V4_POS), kind: 'compound' });
+  let done = await call(client, 'goatlp_stop_automation', { venue: 'v4', id: String(V4_POS), kind: 'compound', execute: true, planId: plan.planId });
+  assert.equal(done.error, undefined, String(done.error));
+  assert.equal(askedAfter, 2, 'after the rule is off and the messages are cancelled on chain');
+  assert.deepEqual((done.steps as Record<string, unknown>[])[2], { step: 3, action: 'Ask the keeper store to drop the signed messages', storeCleared: false, note: 'The keeper store keeps the record until the chain shows the stop.' });
+  await client.close();
+
+  // a transaction that fails stops the plan: the store is not asked
+  const r = setup({ api: { [`/automation/permits/${V4_POS}`]: sessions } });
+  on(r.st);
+  r.chain.receiptStatus = () => (r.signer.sent.length === 2 ? 'reverted' : 'success');
+  client = await connect(r.options);
+  plan = await call(client, 'goatlp_stop_automation', { venue: 'v4', id: String(V4_POS), kind: 'compound' });
+  done = await call(client, 'goatlp_stop_automation', { venue: 'v4', id: String(V4_POS), kind: 'compound', execute: true, planId: plan.planId });
+  assert.match(String(done.error), /Step 2 \(Cancel the signed messages\): The transaction failed on chain/);
+  assert.equal(r.api.requests.filter((x) => x.method === 'DELETE').length, 0);
+  await client.close();
+
+  // confirmed, but the chain does not show the stop yet: the store is not asked either
+  const t = setup({ api: { [`/automation/permits/${V4_POS}`]: sessions } });
+  on(t.st);
+  t.signer.onSend = () => {};
+  client = await connect(t.options);
+  plan = await call(client, 'goatlp_stop_automation', { venue: 'v4', id: String(V4_POS), kind: 'compound' });
+  done = await call(client, 'goatlp_stop_automation', { venue: 'v4', id: String(V4_POS), kind: 'compound', execute: true, planId: plan.planId });
+  assert.equal(t.api.requests.filter((x) => x.method === 'DELETE').length, 0);
+  assert.equal((done.steps as Record<string, unknown>[])[2].note, 'The keeper store keeps the record until the chain shows the stop.');
+  // the store confirms: cleared
+  const d = setup({ api: { [`/automation/permits/${V4_POS}`]: sessions } });
+  on(d.st);
+  const c2 = await connect(d.options);
+  plan = await call(c2, 'goatlp_stop_automation', { venue: 'v4', id: String(V4_POS), kind: 'compound' });
+  done = await call(c2, 'goatlp_stop_automation', { venue: 'v4', id: String(V4_POS), kind: 'compound', execute: true, planId: plan.planId });
+  assert.equal((done.steps as Record<string, unknown>[])[2].storeCleared, true);
+  await client.close();
   await c2.close();
 });

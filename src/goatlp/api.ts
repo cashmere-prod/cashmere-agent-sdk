@@ -99,7 +99,7 @@ export class GoatApi {
     return this.lane(zone, () => this.getNow<T>(path, zone));
   }
 
-  /** POST or DELETE (never cached); the body is JSON */
+  /** A write request (never cached); the body is JSON */
   send<T>(method: 'POST' | 'DELETE', path: string, zone: Zone, body?: unknown): Promise<T> {
     return this.lane(zone, async () => {
       const r = await this.request(method, path, zone, {}, body === undefined ? undefined : JSON.stringify(body));

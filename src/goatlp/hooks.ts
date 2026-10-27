@@ -120,6 +120,18 @@ export const autoCheckOffered = (key: string): boolean => AUTO_CHECK_PAIRS.some(
 
 // ------------------------------------------------------------------ tokens that keep a cut when they move
 
+/**
+ * Pairs where auto-compound is closed on one venue because their pools there are too small (token order does not matter).
+ * The list is empty today; a row closes auto-compound for every pool of that pair on that venue.
+ */
+export interface ThinVenue { label: string; venue: Venue; a: string; b: string }
+export const THIN_COMPOUND_VENUES: readonly ThinVenue[] = [];
+
+export function isThinCompoundPool(f: Pick<PoolFacts, 'venue' | 'token0' | 'token1'>, list: readonly ThinVenue[] = THIN_COMPOUND_VENUES): boolean {
+  const x = lc(f.token0), y = lc(f.token1);
+  return list.some((t) => t.venue === f.venue && ((lc(t.a) === x && lc(t.b) === y) || (lc(t.a) === y && lc(t.b) === x)));
+}
+
 /** Token entries of the automation red list */
 export const RED_LIST_TOKENS: readonly string[] = ['0xa65d0267c8637fcc46ff91e48de766721c750fe3'];
 

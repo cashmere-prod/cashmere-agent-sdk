@@ -1,6 +1,7 @@
 // The keeper's two public surfaces on api.cashmere.exchange:
 //  - /automation/status: a static status file (cached 30 s). Rows of a file older than 10 minutes are ignored, and raw keeper
-//    text is never passed on: only known status keys and short reason keys are kept.
+//    text is never passed on: only known status keys and short reason and advice keys are kept. Its `pairs` rows give the
+//    keeper's size limit per pair (larger runs wait until the pair's price check is deeper), from a fresh file only.
 //  - /automation/permits: the store of v4 auto-compound signed messages. A session is handed over only for a position the
 //    signer owns, only for spender GoatAutoCompoundV4 and only inside the position's nonce window; one session per POST.
 import type { Address, Hex } from 'viem';
@@ -36,6 +37,15 @@ const STATUS_MAP: Readonly<Record<string, KeeperStatusKey>> = {
   'cap-exceeded': 'cap-exceeded',
   'needs-approval': 'needs-approval', advice: 'advice',
 };
+/** Raw statuses that also carry a fixed advice for swap exits (switch to withdraw only) */
+const ADVICE_OF: Readonly<Record<string, string>> = { 'cap-exceeded': 'swap-too-large', 'exit-only': 'swaps-closed' };
+
+/** Plain words for the advice keys this package knows (other keys are not shown) */
+export const KEEPER_ADVICE_TEXT: Readonly<Record<string, string>> = {
+  'swap-too-large': 'The swap exit is too large for this pool near its level. Switching it to withdraw only (swap: false) would act right away.',
+  'pair-capacity': 'The swap exit is too large for this pool near its level. Switching it to withdraw only (swap: false) would act right away.',
+  'swaps-closed': 'Swaps for this pair are closed right now. Switching the exit to withdraw only (swap: false) would act right away.',
+};
 
 /** Plain words for each status key */
 export const KEEPER_STATUS_TEXT: Readonly<Record<KeeperStatusKey, string>> = {
@@ -64,7 +74,7 @@ export function normaliseStatus(x: unknown): KeeperPositionStatus | null {
   const out: KeeperPositionStatus = { tokenId: id, status: STATUS_MAP[raw] ?? 'unknown' };
   const reasonKey = key(o.reason) ?? (KEY_RE.test(raw) ? raw : undefined);
   if (reasonKey) out.reasonKey = reasonKey;
-  const adviceKey = key(o.advice);
+  const adviceKey = key(o.advice) ?? ADVICE_OF[raw];
   if (adviceKey) out.adviceKey = adviceKey;
   const nextCheckAt = sec(o.nextCheckAt);
   if (nextCheckAt) out.nextCheckAt = nextCheckAt;
@@ -78,18 +88,67 @@ export function normaliseStatus(x: unknown): KeeperPositionStatus | null {
 }
 
 export type KeeperFileState = 'fresh' | 'stale' | 'failed';
-export interface KeeperStatusFile { state: KeeperFileState; updatedAt: number | null; rows: KeeperPositionStatus[] }
+/** One `pairs` row: the keeper's size limit of a pair on a venue ('waiting': no swap run fits, maxRunUsd 0) */
+export interface KeeperPairRow { venue: Venue; token0: string; token1: string; state: 'limited' | 'waiting'; maxRunUsd: number; reason: string; eta: number | null }
+export interface KeeperStatusFile { state: KeeperFileState; updatedAt: number | null; rows: KeeperPositionStatus[]; pairs: KeeperPairRow[] }
+
+const PAIR_ADDR_RE = /^0x[0-9a-f]{40}$/;
+const PAIR_KEY_RE = /^[a-z0-9-]+$/;
+
+/** One pairs row, checked (venue v3 / v4; token0 < token1 as lower-case addresses; state limited / waiting; maxRunUsd a whole
+ *  number >= 0 and 0 while waiting; reason a key; eta unix seconds or null). A bad row is null. */
+export function pairRowOf(x: unknown): KeeperPairRow | null {
+  if (!x || typeof x !== 'object' || Array.isArray(x)) return null;
+  const o = x as Record<string, unknown>;
+  if (o.venue !== 'v3' && o.venue !== 'v4') return null;
+  const t0 = o.token0, t1 = o.token1;
+  if (typeof t0 !== 'string' || typeof t1 !== 'string' || !PAIR_ADDR_RE.test(t0) || !PAIR_ADDR_RE.test(t1) || !(t0 < t1)) return null;
+  if (o.state !== 'limited' && o.state !== 'waiting') return null;
+  const m = o.maxRunUsd;
+  if (typeof m !== 'number' || !Number.isSafeInteger(m) || m < 0 || (o.state === 'waiting' && m !== 0)) return null;
+  if (typeof o.reason !== 'string' || !PAIR_KEY_RE.test(o.reason)) return null;
+  const eta = o.eta;
+  if (eta !== null && !(typeof eta === 'number' && Number.isSafeInteger(eta) && eta >= 0)) return null;
+  return { venue: o.venue, token0: t0, token1: t1, state: o.state, maxRunUsd: m, reason: o.reason, eta: eta as number | null };
+}
+
+/** The valid rows of the file's `pairs` section (version 1), one per venue and pair (the first wins); [] when absent */
+export function pairRowsOf(data: unknown): KeeperPairRow[] {
+  const p = data && typeof data === 'object' ? (data as Record<string, unknown>).pairs : undefined;
+  if (!p || typeof p !== 'object' || (p as Record<string, unknown>).version !== 1) return [];
+  const rows = (p as Record<string, unknown>).rows;
+  if (!Array.isArray(rows)) return [];
+  const out: KeeperPairRow[] = [];
+  const seen = new Set<string>();
+  for (const x of rows) {
+    const r = pairRowOf(x);
+    if (!r) continue;
+    const k = `${r.venue}:${r.token0}:${r.token1}`;
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push(r);
+  }
+  return out;
+}
+
+/** The size limit of a pool's pair (token order does not matter), or null when the keeper names none */
+export function sizeLimitOf(file: KeeperStatusFile, venue: Venue, tokenA: string, tokenB: string): { state: 'limited' | 'waiting'; maxRunUsd: number; eta: number | null } | null {
+  const [a, b] = [tokenA.toLowerCase(), tokenB.toLowerCase()].sort();
+  const r = file.pairs.find((p) => p.venue === venue && p.token0 === a && p.token1 === b);
+  return r ? { state: r.state, maxRunUsd: r.maxRunUsd, eta: r.eta } : null;
+}
 
 /** The rows of a status body judged at `nowSec`; a body more than 10 minutes old (or ahead) gives no rows. */
 export function statusFileOf(data: unknown, nowSec: number): KeeperStatusFile {
-  if (!data || typeof data !== 'object' || Array.isArray(data)) return { state: 'failed', updatedAt: null, rows: [] };
+  const none = (state: KeeperFileState, updatedAt: number | null): KeeperStatusFile => ({ state, updatedAt, rows: [], pairs: [] });
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return none('failed', null);
   const o = data as Record<string, unknown>;
   const at = typeof o.updatedAt === 'number' && Number.isFinite(o.updatedAt) ? o.updatedAt : null;
-  if (at === null || at - nowSec > KEEPER_STATUS_MAX_AGE_SEC) return { state: 'failed', updatedAt: null, rows: [] };
-  if (nowSec - at > KEEPER_STATUS_MAX_AGE_SEC) return { state: 'stale', updatedAt: at, rows: [] };
+  if (at === null || at - nowSec > KEEPER_STATUS_MAX_AGE_SEC) return none('failed', null);
+  if (nowSec - at > KEEPER_STATUS_MAX_AGE_SEC) return none('stale', at);
   const raw = Array.isArray(o.positions) ? o.positions : o.positions && typeof o.positions === 'object' ? Object.values(o.positions as Record<string, unknown>) : null;
-  if (!raw) return { state: 'failed', updatedAt: null, rows: [] };
-  return { state: 'fresh', updatedAt: at, rows: raw.map(normaliseStatus).filter((r): r is KeeperPositionStatus => r !== null) };
+  if (!raw) return none('failed', null);
+  return { state: 'fresh', updatedAt: at, rows: raw.map(normaliseStatus).filter((r): r is KeeperPositionStatus => r !== null), pairs: pairRowsOf(data) };
 }
 
 /** The status file (one GET, cached by the API client). Never throws: a failed read is state 'failed'. */
@@ -97,7 +156,7 @@ export async function readKeeperStatus(api: GoatApi, nowSec: number): Promise<Ke
   try {
     return statusFileOf(await api.get<unknown>(routes.automationStatus(), 'other'), nowSec);
   } catch {
-    return { state: 'failed', updatedAt: null, rows: [] };
+    return { state: 'failed', updatedAt: null, rows: [], pairs: [] };
   }
 }
 
@@ -176,12 +235,14 @@ export async function postSession(api: GoatApi, owner: Address, tokenId: bigint,
   }
 }
 
-/** Ask the store to drop a position's sessions after a stop (the on-chain cancel is what makes them unusable). */
-export async function deleteStoredSessions(api: GoatApi, tokenId: bigint): Promise<boolean> {
-  try {
-    await api.send('DELETE', routes.permitsOf(tokenId), 'keeper-write');
-    return true;
-  } catch {
-    return false;
-  }
+export type DropAnswer = { dropped: true } | { dropped: false; kept: true; reason: string } | { dropped: false; kept: false };
+
+/** Ask the store to drop a position's sessions, once the stop is confirmed on chain */
+export async function dropStoredSessions(api: GoatApi, tokenId: bigint): Promise<DropAnswer> {
+  let r: unknown;
+  try { r = await api.send<unknown>('DELETE', routes.permitsOf(tokenId), 'keeper-write'); } catch { return { dropped: false, kept: false }; }
+  const o = r && typeof r === 'object' ? (r as Record<string, unknown>) : {};
+  if (o.deleted === true) return { dropped: true };
+  if (o.deleted === false && (o.reason === 'rule-on' || o.reason === 'changed')) return { dropped: false, kept: true, reason: o.reason };
+  return { dropped: false, kept: false };
 }

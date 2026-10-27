@@ -3,10 +3,10 @@
 // from Robinhood Chain. A chain read that fails says so ("couldn't check"), it never reads as "off".
 import type { Address, Hex } from 'viem';
 import {
-  accountZone, routes, venueOfApi, type GoatApi,
+  accountZone, routes, venueOfApi,
 } from './api';
 import type {
-  ApiAutomationPolicy, ApiCashFlow, ApiDiscoverPool, ApiDiscoverResponse, ApiPerf, ApiPoolDetail, ApiPosition, ApiPositionsResponse,
+  ApiCashFlow, ApiDiscoverPool, ApiDiscoverResponse, ApiPerf, ApiPoolDetail, ApiPosition, ApiPositionsResponse,
 } from './apiTypes';
 import { addressUrl } from './chain';
 import { PINS, PLANNED_FEES, RANGE_MIN_MOVABLE_USD, ST_FLAG, ZERO_ADDRESS } from './constants';
@@ -17,7 +17,8 @@ import {
   loadPoolFacts, loadPositionFacts, onKindsOf, poolIdOf, poolOfPosition, type GoatEnv,
 } from './facts';
 import { hookReview, compoundHookReview } from './hooks';
-import { keeperStatusOf, KEEPER_STATUS_TEXT, listStoredSessions, readKeeperStatus, type KeeperStatusFile } from './keeper';
+import { keeperStatusOf, KEEPER_ADVICE_TEXT, KEEPER_STATUS_TEXT, listStoredSessions, readKeeperStatus, sizeLimitOf, type KeeperStatusFile } from './keeper';
+import { readPolicy } from './policy';
 import { fullRange, rangeAroundPrice, tickToPrice } from './lp/liquidity';
 import { ownSessions, permitWord, unusedCount, type SessionRecord } from './permits';
 import { posmAbi } from './abis';
@@ -54,14 +55,6 @@ function feesText(c: ContractFacts | undefined, venue: Venue) {
     autoRange: `${pctOfBps(bps('range'))} of the amount moved, per move.`,
     autoExit: `${pctOfBps(bps('exit'))}, once, when it closes the position.`,
   };
-}
-
-export async function minUsdOf(api: GoatApi): Promise<number> {
-  try {
-    const p = await api.get<ApiAutomationPolicy>(routes.automationPolicy(), 'other');
-    const v = p?.keeper?.min_position_display_usd;
-    return typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : RANGE_MIN_MOVABLE_USD;
-  } catch { return RANGE_MIN_MOVABLE_USD; }
 }
 
 const chainNote = (e: unknown) => `Could not read Robinhood Chain right now (${e instanceof Error ? e.message.split('\n')[0].slice(0, 160) : String(e)}).`;
@@ -110,10 +103,17 @@ export async function poolsTool(ctx: GoatLpContext, input: PoolsInput) {
     try {
       const env = await ctx.env();
       const facts = rows.map(poolFactsOfDiscover);
-      const loaded = await loadPoolFacts(ctx.chain, facts.filter((f): f is PoolFacts => !!f), env);
+      const [loaded, policy, keeper] = await Promise.all([
+        loadPoolFacts(ctx.chain, facts.filter((f): f is PoolFacts => !!f), env), readPolicy(ctx.api), readKeeperStatus(ctx.api, ctx.nowSec()),
+      ]);
       automation = new Map();
       let j = 0;
-      rows.forEach((p, i) => { if (facts[i]) automation!.set(lc(p.address), poolVerdict(loaded[j++], env.gates)); });
+      rows.forEach((p, i) => {
+        if (!facts[i]) return;
+        const f = loaded[j++];
+        f.sizeLimit = sizeLimitOf(keeper, f.venue, f.token0, f.token1);
+        automation!.set(lc(p.address), poolVerdict(f, env.gates, { switches: policy?.switches }));
+      });
     } catch (e) {
       automationNote = chainNote(e);
     }
@@ -204,8 +204,9 @@ export async function poolTool(ctx: GoatLpContext, input: PoolInput) {
   let fees: ReturnType<typeof feesText> | undefined;
   try {
     const env = await ctx.env();
-    const [f] = await loadPoolFacts(ctx.chain, [facts], env, { caps: true });
-    const v = poolVerdict(f, env.gates);
+    const [[f], policy, keeper] = await Promise.all([loadPoolFacts(ctx.chain, [facts], env, { caps: true }), readPolicy(ctx.api), readKeeperStatus(ctx.api, ctx.nowSec())]);
+    f.sizeLimit = sizeLimitOf(keeper, f.venue, f.token0, f.token1);
+    const v = poolVerdict(f, env.gates, { switches: policy?.switches });
     hook = hookStatus(f);
     fees = feesText(env.contracts, input.venue);
     automation = Object.fromEntries((['compound', 'range', 'exit'] as const).map((k) => [kindKey[k], { ...verdictSummary(v.kinds[k]), ...limitsOf(k, v.kinds[k]) }]));
@@ -256,6 +257,7 @@ function ruleStatus(k: Kind, r: RuleRead | null | 'unknown' | undefined, owner: 
     on,
     ...(r && r.on && !on ? { note: 'A rule from a previous owner is left on chain; it does not run for the new owner.' } : {}),
     ...(row ? { keeper: KEEPER_STATUS_TEXT[row.status] } : {}),
+    ...(row?.adviceKey && KEEPER_ADVICE_TEXT[row.adviceKey] ? { advice: KEEPER_ADVICE_TEXT[row.adviceKey] } : {}),
   };
 }
 
@@ -269,7 +271,7 @@ export async function positionsTool(ctx: GoatLpContext, input: PositionsInput) {
   const body = await ctx.api.get<ApiPositionsResponse>(routes.accountPositions(owner, { scope, limit, cursor: input.cursor ?? null, venue: input.venue }), accountZone(scope));
   const rows = (body.data ?? []).filter((p) => venueOfApi(p.exchange));
   let facts: Map<string, PositionFacts> | null = null;
-  let keeper: KeeperStatusFile = { state: 'failed', updatedAt: null, rows: [] };
+  let keeper: KeeperStatusFile = { state: 'failed', updatedAt: null, rows: [], pairs: [] };
   let chainNoteText: string | undefined;
   const open = rows.filter((p) => !p.exited);
   if (open.length) {
@@ -425,12 +427,13 @@ export async function positionTool(ctx: GoatLpContext, input: PositionInput) {
       return [kindKey[k], fromOld ? { ...d, on: false, note: 'Set by a previous owner; it does not run for the new owner.' } : d];
     }));
     const onKinds = onKindsOf(f.rules, owner);
-    const minUsd = await minUsdOf(ctx.api);
+    const [policy, keeper] = await Promise.all([readPolicy(ctx.api), readKeeperStatus(ctx.api, ctx.nowSec())]);
+    const minUsd = policy?.minUsd ?? RANGE_MIN_MOVABLE_USD;
     const account = ctx.account ?? (owner !== 'unknown' ? owner : undefined);
-    const verdict = pf ? positionVerdict(poolVerdict(pf, env.gates), f, { account: account ?? undefined, onKinds, contracts: env.contracts, valueUsd: api?.underlying_value ?? undefined, minUsd }) : null;
+    if (pf) pf.sizeLimit = sizeLimitOf(keeper, pf.venue, pf.token0, pf.token1);
+    const verdict = pf ? positionVerdict(poolVerdict(pf, env.gates, { switches: policy?.switches }), f, { account: account ?? undefined, onKinds, contracts: env.contracts, valueUsd: api?.underlying_value ?? undefined, minUsd }) : null;
     const approved = f.approved;
     const spenderKey = approved && approved !== 'unknown' ? isGoatSpender(approved, env.contracts.spenders ?? {}) : null;
-    const keeper = await readKeeperStatus(ctx.api, ctx.nowSec());
     const keeperRows = (['compound', 'range', 'exit'] as const).map((k) => [k, keeperStatusOf(keeper, id, input.venue, k)] as const).filter(([, r]) => r);
     let signed: Awaited<ReturnType<typeof signedRunsLeft>> = null;
     const c4 = f.rules?.compound;
@@ -444,7 +447,10 @@ export async function positionTool(ctx: GoatLpContext, input: PositionInput) {
         : { address: approved, holder: spenderKey ? SPENDER_NAME[spenderKey] : 'another app (not Goat LP)' },
       rules,
       ...(signed ? { autoCompoundSignedMessages: signed } : {}),
-      ...(keeperRows.length ? { keeper: Object.fromEntries(keeperRows.map(([k, r]) => [kindKey[k], { status: KEEPER_STATUS_TEXT[r!.status], ...(r!.reasonKey ? { reason: r!.reasonKey } : {}) }])) } : {}),
+      ...(keeperRows.length ? { keeper: Object.fromEntries(keeperRows.map(([k, r]) => [kindKey[k], {
+        status: KEEPER_STATUS_TEXT[r!.status], ...(r!.reasonKey ? { reason: r!.reasonKey } : {}),
+        ...(r!.adviceKey && KEEPER_ADVICE_TEXT[r!.adviceKey] ? { advice: KEEPER_ADVICE_TEXT[r!.adviceKey] } : {}),
+      }])) } : {}),
       ...(keeper.state === 'stale' ? { keeperStatus: 'The keeper status file is older than 10 minutes; its rows are not shown.' } : {}),
       canTurnOn: verdict ? Object.fromEntries((['compound', 'range', 'exit'] as const).map((k) => [kindKey[k], { ...verdictSummary(verdict.kinds[k]), ...limitsOf(k, verdict.kinds[k]) }])) : 'unknown (the pool could not be read)',
       ...(ctx.account ? {} : { canTurnOnNote: 'Checked for the owner shown; this server has no wallet configured.' }),

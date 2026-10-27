@@ -202,6 +202,8 @@ export interface WorldState {
   steward: Map<bigint, Record<string, number>>; stewardOwner: Map<bigint, Address>;
   /** POSM nonce bitmaps by `${owner}:${word}` */
   nonces: Map<string, bigint>;
+  /** approvals for all positions by `${venue}:${owner}:${operator}` */
+  forAll: Set<string>;
 }
 
 const GAC3_OFF_T = [false, false, 0, 0, 0, 0n, 0n];
@@ -222,7 +224,7 @@ export function goatWorld(o: { owner?: Address; v4Range?: [number, number] } = {
   const st: WorldState = {
     owner: new Map([[`v4:${V4_POS}`, owner], [`v3:${V3_POS}`, owner]]), approved: new Map(),
     gac3: new Map(), gac3Owner: new Map(), gac4: new Map(), gac4Owner: new Map(), ar: new Map(), arOwner: new Map(), ae: new Map(), aeOwner: new Map(),
-    steward: new Map(), stewardOwner: new Map(), nonces: new Map(),
+    steward: new Map(), stewardOwner: new Map(), nonces: new Map(), forAll: new Set(),
   };
   chain.codeHashes.set(REVIEWED_HOOK.toLowerCase(), REVIEWED_HOOK_HASH);
   const id = (a: readonly unknown[]) => BigInt(a[0] as bigint);
@@ -247,6 +249,8 @@ export function goatWorld(o: { owner?: Address; v4Range?: [number, number] } = {
     // v4 position manager
     .on(POSM, 'ownerOf', (a: readonly unknown[]) => st.owner.get(`v4:${id(a)}`) ?? notMinted())
     .on(POSM, 'getApproved', (a: readonly unknown[]) => st.approved.get(`v4:${id(a)}`) ?? ZERO)
+    .on(POSM, 'isApprovedForAll', (a: readonly unknown[]) => st.forAll.has(`v4:${lc(a[0] as string)}:${lc(a[1] as string)}`))
+    .on(NPM, 'isApprovedForAll', (a: readonly unknown[]) => st.forAll.has(`v3:${lc(a[0] as string)}:${lc(a[1] as string)}`))
     .on(POSM, 'getPoolAndPositionInfo', (a: readonly unknown[]) => (id(a) === V4_POS
       ? [{ currency0: ZERO, currency1: USDG_T, fee: 8388608, tickSpacing: 10, hooks: REVIEWED_HOOK }, v4Info(v4Lower, v4Upper)] : notMinted()))
     .on(POSM, 'getPositionLiquidity', (a: readonly unknown[]) => (id(a) === V4_POS ? 7629398407350629n : 0n))

@@ -90,6 +90,8 @@ export interface PoolFacts {
   swapCaps?: Maybe<{ cap0: bigint; cap1: bigint }>;
   /** the keeper's drift key of a pair priced without Chainlink */
   ncKey?: string;
+  /** the keeper's size limit of this pair (its status file): larger runs wait ('limited'), or no swap run fits ('waiting') */
+  sizeLimit?: { state: 'limited' | 'waiting'; maxRunUsd: number; eta: number | null } | null;
 }
 
 export interface PositionFacts {
@@ -139,7 +141,7 @@ export type EligCode =
   | 'NO_PRICE_REFERENCE' | 'SWAPS_CLOSED' | 'UNREVIEWED_HOOK' | 'HOOK_RETURN_DELTA' | 'HOOK_NO_NEW_DEPOSITS' | 'RED_LISTED'
   | 'TRANSFER_TAX_TOKEN' | 'TAXED_POOL' | 'DYNAMIC_FEE_NO_HOOK' | 'UNLISTED_POOL' | 'REVIEWED_HOOK' | 'SMALL_POSITION'
   | 'PAUSED' | 'RETIRED' | 'UNKNOWN' | 'SELF_ANCHOR' | 'HOOK_CUT' | 'HOOK_CLAIM_ONLY' | 'HOOK_SLIP_HINT' | 'USABLE_SIZE'
-  | 'NO_PRICE_CHECK';
+  | 'NO_PRICE_CHECK' | 'SIZE_LIMITED' | 'THIN_POOL';
 export interface Line { code: EligCode; level: Level; text: string; why?: string }
 export interface KindLimits {
   exitWithdrawOnly?: boolean;
@@ -150,6 +152,10 @@ export interface KindLimits {
   poolFeePips?: number;
   /** v4 auto-compound: the pool's hook only allows sending fees to the wallet */
   claimOnly?: boolean;
+  /** auto-compound: the price protection the pool's hook needs at least (its own swap fee + 0.5%) */
+  slipHintBps?: number;
+  /** auto-exit: the keeper runs no swap exit on this pair right now (its price check is waiting) */
+  sizeWaiting?: boolean;
   swapCaps?: { cap0: bigint; cap1: bigint };
 }
 export interface KindVerdict { live: boolean; offered: boolean; lines: Line[]; limits: KindLimits }

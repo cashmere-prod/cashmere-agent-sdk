@@ -14,8 +14,8 @@ import type { ApiPosition } from './apiTypes';
 import { checkPins, type McCall } from './chain';
 import {
   BOUNDS, COMPOUND_INTERVAL_DEFAULT, COMPOUND_INTERVAL_PRESETS, COMPOUND_SLIP_DEFAULT_BPS, DAY, EXIT_DEFAULT_OFFSET_PCT, GOAT_CHAIN_ID,
-  HORIZON_DEFAULT_DAYS, HORIZON_MAX_DAYS, HOUR, MAX_RUNS_PER_SESSION, MAX_SWAP_FEE_DEFAULT_PIPS, NPM, PINS, POSM, RANGE_INTERVAL_DEFAULT,
-  RANGE_SLIP_DEFAULT_BPS, RUNS_TO_SIGN_DEFAULT, SMALL_HORIZON_DAYS, SMALL_RUNS_TO_SIGN, STEWARD_BUDGET, pinOf, type PinKey,
+  HORIZON_DEFAULT_DAYS, HORIZON_MAX_DAYS, HOUR, MAX_RUNS_PER_SESSION, MAX_SWAP_FEE_DEFAULT_PIPS, NPM, POSM, RANGE_INTERVAL_DEFAULT,
+  RANGE_MIN_MOVABLE_USD, RANGE_SLIP_DEFAULT_BPS, RUNS_TO_SIGN_DEFAULT, SMALL_HORIZON_DAYS, SMALL_RUNS_TO_SIGN, STEWARD_BUDGET, pinOf, type PinKey,
 } from './constants';
 import {
   alignWidth, contractFor, isGoatSpender, setExit, setRange, spenderFor, stopPlan, turnOnSteps, v3CompoundEnable, v3ExitEnable,
@@ -29,14 +29,15 @@ import {
 } from './facts';
 import { assertAutomationTx, checkAutomationTypedData, type GuardCtx, type GuardIntent } from './guard';
 import {
-  deleteStoredSessions, handOverRefusal, handOverSessions, listStoredSessions, postSession, type SignedSession,
+  dropStoredSessions, handOverRefusal, handOverSessions, listStoredSessions, postSession, readKeeperStatus, sizeLimitOf, type SignedSession,
 } from './keeper';
+import { readPolicy, type Switches } from './policy';
 import { tickToPrice } from './lp/liquidity';
 import { simulate, type BuiltPlan, type PlanStep, type TxStep, type WorkStep } from './plans';
 import {
-  allocateSessionWord, isUsed, ownSessions, permitTypedData, permitWord, revokeSet, scanSessionWords, sessionNonces, type SessionRecord,
+  allocateSessionWord, isUsed, ownSessions, permitTypedData, permitWord, revokeSet, scanSessionWords, sessionNonces, sessionUnion,
 } from './permits';
-import { describeRule, minUsdOf, sig } from './read';
+import { describeRule, sig } from './read';
 import type {
   AutoCall, CompoundV3Draft, CompoundV4Draft, ExitSide, ExitV3Draft, ExitV4Draft, Kind, KindVerdict, PoolFacts, PositionFacts, RangeV3Draft,
   RangeV4Draft, RuleDraft, RuleRead, Venue,
@@ -91,6 +92,8 @@ interface Gathered {
   onKinds: Kind[] | 'unknown';
   valueUsd?: number;
   minUsd: number;
+  /** the served switches; null = the policy could not be read */
+  switches: Switches | null;
   api: ApiPosition | null;
   spenders: Spenders;
 }
@@ -113,10 +116,13 @@ async function gather(ctx: GoatLpContext, venue: Venue, id: bigint): Promise<Gat
   if (!eq(f.owner as string, signer!.address)) refuse(`${WRONG_OWNER_NOW} It belongs to ${f.owner as string}.`);
   const pool = await poolOfPosition(ctx.chain, f);
   if (!pool) refuse("couldn't read this position's pool on chain.");
-  const [[pf], api, minUsd] = await Promise.all([loadPoolFacts(ctx.chain, [pool!], env, { caps: true }), apiPosition(ctx, venue, id), minUsdOf(ctx.api)]);
+  const [[pf], api, policy, keeper] = await Promise.all([
+    loadPoolFacts(ctx.chain, [pool!], env, { caps: true }), apiPosition(ctx, venue, id), readPolicy(ctx.api), readKeeperStatus(ctx.api, ctx.nowSec()),
+  ]);
+  pf.sizeLimit = sizeLimitOf(keeper, venue, pf.token0, pf.token1);
   const v = api?.underlying_value;
   return {
-    env, f, pf, onKinds: onKindsOf(f.rules, f.owner), minUsd, api,
+    env, f, pf, onKinds: onKindsOf(f.rules, f.owner), minUsd: policy?.minUsd ?? RANGE_MIN_MOVABLE_USD, switches: policy?.switches ?? null, api,
     ...(typeof v === 'number' && Number.isFinite(v) ? { valueUsd: v } : {}),
     spenders: env.contracts.spenders ?? {},
   };
@@ -259,7 +265,9 @@ export function buildDraft(input: SetAutomationInput, kv: KindVerdict, p: { tick
   const maxSlip = l.maxSlippageBps ?? BOUNDS.steward.hookFreeMaxSlippageBps;
   const swapFee = input.maxSwapFeePct !== undefined ? Math.round(input.maxSwapFeePct * 10_000) : Math.max(MAX_SWAP_FEE_DEFAULT_PIPS, l.poolFeePips ?? 0);
   if (input.kind === 'compound') {
-    const slip = input.maxPriceProtectionBps ?? COMPOUND_SLIP_DEFAULT_BPS;
+    // with no input: the app's default, or what the pool's hook needs at least when that is more (within the contract's bound)
+    const bound = input.venue === 'v3' ? BOUNDS.gac3.maxSlippageBps : BOUNDS.gac4.maxSlippageBps;
+    const slip = input.maxPriceProtectionBps ?? Math.min(bound, Math.max(COMPOUND_SLIP_DEFAULT_BPS, l.slipHintBps ?? 0));
     if (input.venue === 'v3') {
       return { kind: 'compound', venue: 'v3', swapEnabled: input.swapToMatch ?? true, maxSlippageBps: slip, minInterval: hours(input.minIntervalHours, COMPOUND_INTERVAL_DEFAULT) } satisfies CompoundV3Draft;
     }
@@ -363,7 +371,8 @@ export async function planSetAutomation(ctx: GoatLpContext, input: SetAutomation
   const { kind, venue } = input;
   const g = await gather(ctx, venue, id);
   const signer = ctx.signer!;
-  const verdict = positionVerdict(poolVerdict(g.pf, g.env.gates), g.f, { account: signer.address, onKinds: g.onKinds, contracts: g.env.contracts, valueUsd: g.valueUsd, minUsd: g.minUsd });
+  if (!g.switches) refuse(ELIG.POLICY_UNREAD);
+  const verdict = positionVerdict(poolVerdict(g.pf, g.env.gates, { switches: g.switches }), g.f, { account: signer.address, onKinds: g.onKinds, contracts: g.env.contracts, valueUsd: g.valueUsd, minUsd: g.minUsd });
   const kv = verdict.kinds[kind];
   const name = KIND_NAME[kind];
   if (!kv.live) refuse(`${name} on ${VENUE_NAME[venue]}: ${kv.lines.find((l) => l.code === 'NOT_LIVE')?.why ?? ELIG.NOT_LIVE}`);
@@ -381,6 +390,8 @@ export async function planSetAutomation(ctx: GoatLpContext, input: SetAutomation
   }
   const p = { tickLower: g.f.tickLower, tickUpper: g.f.tickUpper, tickSpacing: g.f.tickSpacing, fee: g.pf.fee };
   const draft = buildDraft(input, kv, p, g.valueUsd, g.minUsd);
+  const swapSide = draft.kind === 'exit' && (draft.lower.swap || draft.upper.swap);
+  if (swapSide && kv.limits.sizeWaiting) refuse(`${ELIG.SIZE_WAITING_EXIT} Set swap: false on that side for an exit that withdraws only.`);
   const pool = poolCtxOf(p, kv);
   const swapAllowed = !kv.limits.exitWithdrawOnly;
   const change = mode !== 'turn-on';
@@ -427,7 +438,8 @@ export async function planSetAutomation(ctx: GoatLpContext, input: SetAutomation
     }));
     if (!v.ok) refuse(`${v.reason} (${v.rule}).`);
   }
-  const notes = kv.lines.filter((l) => l.level !== 'block').map((l) => l.text);
+  // the size-limit line belongs to plans that swap: auto-range and swap exits
+  const notes = kv.lines.filter((l) => l.level !== 'block' && !(l.code === 'SIZE_LIMITED' && draft.kind === 'exit' && !swapSide)).map((l) => l.text);
   return {
     tool: `goatlp_set_auto_${kind}`,
     view: {
@@ -540,24 +552,29 @@ export async function planStop(ctx: GoatLpContext, input: StopInput): Promise<Bu
   let revokeNonces: bigint[] = [];
   let signedNote: string | undefined;
   if (kind === 'compound' && venue === 'v4') {
+    // the union of the keeper store's sessions, this server's record and the chain's scan
     const gac4 = TARGETS.autoCompoundV4;
     const base = permitWord(gac4, id);
     const owner = signer.address;
     const stored = await listStoredSessions(ctx.api, id);
-    const fromStore = ownSessions(base, stored?.sessions ?? []);
-    const sessions: SessionRecord[] = fromStore.length ? fromStore : ownSessions(base, ctx.sessions.list(owner, id));
+    const store = ownSessions(base, stored?.sessions ?? []);
+    const local = ownSessions(base, ctx.sessions.list(owner, id));
     const read = (o: Address, w: bigint) => ctx.chain.read<bigint>({ address: POSM, abi: posmAbi, functionName: 'nonces', args: [o, w] });
-    const bitmaps = new Map<string, bigint>();
-    for (const s of sessions) bitmaps.set(String(s.word), await read(owner, s.word));
-    let fallbackWords: bigint[] = [];
-    if (!sessions.length) {
-      const scan = await scanSessionWords(read, { owner, gac4, tokenId: id });
-      fallbackWords = scan.words;
-      for (const [k, v] of scan.bitmaps) bitmaps.set(k, v);
-    }
-    revokeNonces = revokeSet({ base, sessions, bitmaps, fallbackWords });
-    signedNote = sessions.length ? `${revokeNonces.length} signed and unused messages are cancelled.` : `No record of the signed messages: every unused nonce of this position's signing window that may hold one is cancelled (${revokeNonces.length}).`;
+    const scan = await scanSessionWords(read, { owner, gac4, tokenId: id });
+    const bitmaps = new Map(scan.bitmaps);
+    for (const s of [...store, ...local]) if (!bitmaps.has(String(s.word))) bitmaps.set(String(s.word), await read(owner, s.word));
+    const u = sessionUnion(base, { store, local, scanWords: scan.words, bitmaps });
+    revokeNonces = revokeSet({ base, sessions: u.sessions, bitmaps });
+    signedNote = u.source === 'records' ? `${revokeNonces.length} signed and unused messages are cancelled.`
+      : u.source === 'union' ? `The keeper store, this server's record and the chain do not agree: every unused message any of them shows is cancelled (${revokeNonces.length}).`
+        : `No record of the signed messages: every unused nonce of this position's signing window that may hold one is cancelled (${revokeNonces.length}).`;
   }
+  // an approval for all positions is never changed by this tool; the plan says when one is on
+  const nftOf = venue === 'v4' ? { address: POSM, abi: posmAbi } : { address: NPM, abi: npmAbi };
+  const forAllSpender = kind === 'compound' && venue === 'v4' ? g.spenders.autoCompoundV4 : spenderFor(kind, venue, g.spenders);
+  const forAll = forAllSpender
+    ? await ctx.chain.read<boolean>({ ...nftOf, functionName: 'isApprovedForAll', args: [signer.address, forAllSpender] } as McCall).catch(() => 'unknown' as const)
+    : false;
   const plan = stopPlan(kind, venue, { tokenId: id, targets: TARGETS, spenders: g.spenders, approved, revokeNonces, ruleOn });
   if (!plan.ok) refuse(plan.errors.join(' '));
   const calls = (plan as { ok: true; value: AutoCall[] }).value;
@@ -571,13 +588,16 @@ export async function planStop(ctx: GoatLpContext, input: StopInput): Promise<Bu
   }
   const steps: PlanStep[] = calls.map((call) => txStep(ctx, g, call, guardX, () => verifyCall(ctx, call)));
   if (kind === 'compound' && venue === 'v4') {
+    const KEPT = 'The keeper store keeps the record until the chain shows the stop.';
     steps.push({
-      kind: 'post', label: 'Ask the keeper store to drop the signed messages', key: `${id}|keeper-store-delete`,
-      view: { type: 'hand-over', to: `${ctx.api.base}/automation/permits/${id}`, what: 'DELETE: the cancel on chain is what makes them unusable; the store then holds nothing the keeper could use' },
+      kind: 'post', label: 'Ask the keeper store to drop the signed messages', key: `${id}|keeper-store-drop`,
+      view: { type: 'hand-over', to: `${ctx.api.base}/automation/permits/${id}`, what: 'once the steps above are confirmed on chain' },
       run: async () => {
-        const ok = await deleteStoredSessions(ctx.api, id);
         ctx.sessions.clear(signer.address, id);
-        return { storeCleared: ok };
+        if (!(await stopShown(ctx, id, revokeNonces))) return { storeCleared: false, note: KEPT };
+        const a = await dropStoredSessions(ctx.api, id);
+        if (a.dropped) return { storeCleared: true };
+        return { storeCleared: false, note: a.kept ? KEPT : 'The keeper store did not answer. The signed messages are cancelled on chain.' };
       },
     });
   }
@@ -594,6 +614,8 @@ export async function planStop(ctx: GoatLpContext, input: StopInput): Promise<Bu
         ...(signedNote ? [signedNote] : []),
       ],
       ...(approved && !approvedHere ? { leftAlone: `another app's approval (${approved}) is not touched` } : {}),
+      ...(forAll === true ? { allowForAll: `An approval for all positions to ${pinOf(forAllSpender)?.pin.name ?? forAllSpender} (${forAllSpender}) is still on. This tool never changes it; it can be removed in the Goat LP app.` } : {}),
+      ...(forAll === 'unknown' ? { allowForAll: "couldn't read whether an approval for all positions is on; this tool never changes one." } : {}),
       afterwards: 'The position stays as it is: same range and tokens, and fees keep accruing.',
     },
     steps,
@@ -605,3 +627,21 @@ export async function planStop(ctx: GoatLpContext, input: StopInput): Promise<Bu
   };
 }
 
+
+/** Does the chain show the v4 auto-compound stop: the rule off, the cancelled messages used up, no permission to it? */
+async function stopShown(ctx: GoatLpContext, id: bigint, revoked: readonly bigint[]): Promise<boolean> {
+  try {
+    const owner = ctx.signer!.address;
+    const cfg = toGac4(await ctx.chain.read({ address: TARGETS.autoCompoundV4, abi: gac4Abi, functionName: 'configs', args: [id] }));
+    if (cfg.enabled) return false;
+    const approved = await ctx.chain.read<Address>({ address: POSM, abi: posmAbi, functionName: 'getApproved', args: [id] });
+    if (eq(approved, TARGETS.autoCompoundV4)) return false;
+    for (const n of revoked) {
+      const bm = await ctx.chain.read<bigint>({ address: POSM, abi: posmAbi, functionName: 'nonces', args: [owner, n >> 8n] });
+      if (!isUsed(bm, Number(n & 255n))) return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}

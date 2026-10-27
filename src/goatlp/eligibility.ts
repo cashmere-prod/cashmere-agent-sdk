@@ -1,11 +1,12 @@
 // Which automations a pool and a position can have, and why not. One function family for the read tools and the write
 // tools. Rule order is the priority of the reason given:
-//  1. the contract's code-hash check (not live = nothing can be sent).
+//  1. the contract's code-hash check and the switch the served policy may carry (not live = nothing can be sent).
 //  2. pool-wide blocks for every kind: the registry's red list, a hook that can change what a withdrawal returns, a dynamic
 //     fee without a hook, and the hook rule of ./hooks.ts (an unread code hash = "couldn't check").
 //  3. a price reference for every kind: auto-compound needs Chainlink for both tokens or a deep anchor pool; v4 auto-range /
 //     auto-exit need a listed registry entry with a price source; v3 ones need the pair table to cover the fee tier.
-//  4. kind-specific limits: no new deposits, unlisted pools, closed swaps, transfer-tax tokens, taxed pools, reviewed hooks.
+//  4. kind-specific limits: no new deposits, unlisted pools, closed swaps, transfer-tax tokens, taxed pools, reviewed hooks,
+//     pairs too small for auto-compound, and the keeper's size limit of the pair (larger runs wait; or no swap run fits).
 //  5. position level: owner, empty, subscriber, one automation at a time, full range, too narrow, size, paused, retired.
 // A fact that was not read adds no line; a fact whose read failed adds a "couldn't check" block, never an "off".
 import type { Address } from 'viem';
@@ -13,7 +14,8 @@ import { getSqrtRatioAtTick } from './lp/tickMath';
 import { amountsForLiquidityUp } from './lp/liquidity';
 import { BOUNDS, CAP_UNLIMITED, RANGE_MIN_MOVABLE_USD, hasPriceSource } from './constants';
 import { ELIG, oneAtATimeText, pctOfBps, pctOfPips, pctOfTicks } from './copy';
-import { autoCheckOffered, compoundHookReview, hookClassOf, hookPermissionBits, hookReview, transferTaxOf } from './hooks';
+import { autoCheckOffered, compoundHookReview, hookClassOf, hookPermissionBits, hookReview, isThinCompoundPool, transferTaxOf, type ThinVenue } from './hooks';
+import type { Switches } from './policy';
 import { KINDS } from './types';
 import type {
   ContractFacts, ContractGates, Kind, KindLimits, KindVerdict, Line, PoolFacts, PoolVerdict, PositionFacts, Venue,
@@ -89,12 +91,17 @@ export function usableShare(p: Pick<PositionFacts, 'liquidity' | 'tickLower' | '
 }
 const usdShort = (v: number | null): string | null => (v === null ? null : `$${v >= 1000 ? Math.round(v).toLocaleString('en-US') : v.toFixed(0)}`);
 
-function kindPool(kind: Kind, f: PoolFacts, gates: ContractGates): KindVerdict {
+/** Options of a pool verdict: the served switches (an automation switched off there is not live) and the thin-pool list */
+export interface VerdictOpts { switches?: Switches | null; thinVenues?: readonly ThinVenue[] }
+
+function kindPool(kind: Kind, f: PoolFacts, gates: ContractGates, o: VerdictOpts = {}): KindVerdict {
   const lines: Line[] = [];
   const limits: KindLimits = {};
   const gate = gates[contractFor(kind, f.venue)];
-  const live = gate.ok;
-  if (!live) lines.push(line('NOT_LIVE', 'block', ELIG.NOT_LIVE, gate.reason));
+  const switchedOff = o.switches?.[f.venue]?.[kind] === false;
+  const live = gate.ok && !switchedOff;
+  if (!gate.ok) lines.push(line('NOT_LIVE', 'block', ELIG.NOT_LIVE, gate.reason));
+  else if (switchedOff) lines.push(line('NOT_LIVE', 'block', ELIG.SWITCHED_OFF, ELIG.SWITCHED_OFF));
   const isV4 = f.venue === 'v4';
   const hooks = isV4 ? f.hooks : undefined;
   const hooksRead = !isV4 || hooks !== undefined;
@@ -128,7 +135,9 @@ function kindPool(kind: Kind, f: PoolFacts, gates: ContractGates): KindVerdict {
     const he = f.hookEntry;
     const cap = he && he !== 'unknown' && he.feeCapPips > 0 ? he.feeCapPips : 0;
     lines.push(line('HOOK_SLIP_HINT', 'info', cap ? ELIG.HOOK_SLIP(pctOfBps(Math.ceil(cap / 100) + 50)) : ELIG.HOOK_SLIP_GENERIC));
+    if (cap) limits.slipHintBps = Math.ceil(cap / 100) + 50;
   }
+  if (kind === 'compound' && isThinCompoundPool(f, o.thinVenues)) lines.push(line('THIN_POOL', 'block', ELIG.THIN_POOL));
 
   // 3. price reference
   const noRef = () => line('NO_PRICE_REFERENCE', 'block', ELIG.NO_PRICE_REFERENCE);
@@ -182,6 +191,14 @@ function kindPool(kind: Kind, f: PoolFacts, gates: ContractGates): KindVerdict {
       if (!he.exitOnly && he.feeCapPips > 0) lines.push(line('REVIEWED_HOOK', 'info', ELIG.REVIEWED_HOOK(pctOfPips(he.feeCapPips), pctOfBps(poolMaxSlip(f)))));
     }
   }
+  // the keeper's size limit of the pair: larger runs wait (a limit, no numbers); with no swap run fitting, auto-range is not
+  // offered and a swap exit waits (the exit without a swap is not affected)
+  const sl = f.sizeLimit;
+  if (sl && sl.state === 'limited' && (kind === 'range' || (kind === 'exit' && !limits.exitWithdrawOnly))) lines.push(line('SIZE_LIMITED', 'limit', ELIG.SIZE_LIMITED));
+  if (sl && sl.state === 'waiting') {
+    if (kind === 'range') lines.push(line('SIZE_LIMITED', 'block', ELIG.SIZE_WAITING_RANGE));
+    if (kind === 'exit' && !limits.exitWithdrawOnly) { lines.push(line('SIZE_LIMITED', 'limit', ELIG.SIZE_WAITING_EXIT)); limits.sizeWaiting = true; }
+  }
   if (kind === 'exit' && limits.exitWithdrawOnly && !(g > 0)) {
     const wg = withdrawOnlyExitGate(f);
     if (wg > 0) limits.gateTicks = wg;
@@ -190,8 +207,8 @@ function kindPool(kind: Kind, f: PoolFacts, gates: ContractGates): KindVerdict {
 }
 
 /** Pool verdict: each kind offered or not, with the reasons and the pair's limits. */
-export function poolVerdict(f: PoolFacts, gates: ContractGates): PoolVerdict {
-  return { venue: f.venue, kinds: { compound: kindPool('compound', f, gates), range: kindPool('range', f, gates), exit: kindPool('exit', f, gates) } };
+export function poolVerdict(f: PoolFacts, gates: ContractGates, o: VerdictOpts = {}): PoolVerdict {
+  return { venue: f.venue, kinds: { compound: kindPool('compound', f, gates, o), range: kindPool('range', f, gates, o), exit: kindPool('exit', f, gates, o) } };
 }
 
 export interface PositionCtx {
@@ -271,6 +288,7 @@ const CODE_RANK: Readonly<Record<Line['code'], number>> = {
   EMPTY: 8, SUBSCRIBER: 9, ONE_AT_A_TIME: 10, FULL_RANGE: 11, HOOK_NO_NEW_DEPOSITS: 12, UNREVIEWED_HOOK: 13, UNLISTED_POOL: 14,
   SWAPS_CLOSED: 15, NO_PRICE_CHECK: 15, TRANSFER_TAX_TOKEN: 16, TOO_NARROW: 17, PAUSED: 18, UNKNOWN: 20, TAXED_POOL: 21,
   REVIEWED_HOOK: 22, SMALL_POSITION: 23, SELF_ANCHOR: 24, HOOK_CLAIM_ONLY: 25, USABLE_SIZE: 26, HOOK_CUT: 27, HOOK_SLIP_HINT: 28,
+  THIN_POOL: 7, SIZE_LIMITED: 29,
 };
 /** Lines in display order: blocks first (by priority), then limits, then notes. */
 export function sortLines(lines: readonly Line[]): Line[] {
@@ -284,9 +302,13 @@ export function blockOf(v: KindVerdict): Line | null {
 
 /** A compact summary of a verdict for the read tools: offered, the first reason when not, and the other lines. */
 export function verdictSummary(v: KindVerdict): { offered: boolean; why?: string; notes?: string[] } {
-  const b = v.offered ? null : blockOf(v);
+  const offered = v.live && v.offered;
+  // not live comes first: nothing can be sent, whatever else applies
+  const notLive = v.live ? null : v.lines.find((l) => l.code === 'NOT_LIVE') ?? null;
+  const b = offered ? null : notLive ?? blockOf(v);
   const notes = v.lines.filter((l) => l !== b && l.code !== 'NOT_LIVE').map((l) => l.text);
-  return { offered: v.offered, ...(b ? { why: b.text } : {}), ...(notes.length ? { notes } : {}) };
+  const why = b && b.code === 'NOT_LIVE' && b.why && b.why !== b.text ? `${b.text} ${b.why}` : b?.text;
+  return { offered, ...(why ? { why } : {}), ...(notes.length ? { notes } : {}) };
 }
 
 export type { Venue };
