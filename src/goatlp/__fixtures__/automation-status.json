@@ -1,0 +1,39 @@
+{
+ "version": 1,
+ "updatedAt": 1793092376,
+ "positions": [
+  {
+   "tokenId": "3944803",
+   "venue": "v4",
+   "kind": "range",
+   "status": "ok",
+   "reason": null,
+   "advice": null,
+   "nextCheckAt": null,
+   "holdUntil": null,
+   "etaSeconds": null
+  },
+  {
+   "tokenId": "3947318",
+   "venue": "v4",
+   "kind": "exit",
+   "status": "ok",
+   "reason": null,
+   "advice": null,
+   "nextCheckAt": null,
+   "holdUntil": null,
+   "etaSeconds": null
+  },
+  {
+   "tokenId": "3963913",
+   "venue": "v4",
+   "kind": "range",
+   "status": "ok",
+   "reason": null,
+   "advice": null,
+   "nextCheckAt": null,
+   "holdUntil": null,
+   "etaSeconds": null
+  }
+ ]
+}

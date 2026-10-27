@@ -6,7 +6,7 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { ALL_NETWORKS } from '../constants';
 import type { TransferParams, TransferResult } from '../types';
-import { createCashmereMcpServer, redact, serverOptionsFromEnv, type CashmereMcpServerOptions } from './server';
+import { SECRET_ENV_NAMES, createCashmereMcpServer, redact, serverOptionsFromEnv, type CashmereMcpServerOptions } from './server';
 
 // A throwaway key so the bridge tool registers: cashmere_bridge only ever runs against a stub
 const KEY = `0x${'ab'.repeat(32)}`;
@@ -40,6 +40,8 @@ function json(result: Awaited<ReturnType<Client['callTool']>>) {
   return JSON.parse(content.text);
 }
 
+const GOATLP_READ = ['goatlp_pool', 'goatlp_pools', 'goatlp_position', 'goatlp_positions'];
+
 async function toolNames(client: Client): Promise<string[]> {
   const { tools } = await client.listTools();
   return tools.map(t => t.name).sort();
@@ -48,7 +50,7 @@ async function toolNames(client: Client): Promise<string[]> {
 test('with a signer the server lists simulate, routes and a confirm-first bridge', async () => {
   const client = await connect({ config: { evm: { privateKey: KEY }, sui: { privateKey: KEY } } });
   const { tools } = await client.listTools();
-  assert.deepEqual(tools.map(t => t.name).sort(), ['cashmere_bridge', 'cashmere_simulate', 'cashmere_supported_routes']);
+  assert.deepEqual(tools.map(t => t.name).sort(), ['cashmere_bridge', 'cashmere_simulate', 'cashmere_supported_routes', ...GOATLP_READ]);
 
   for (const name of ['cashmere_simulate', 'cashmere_supported_routes']) {
     assert.equal(tools.find(t => t.name === name)!.annotations?.readOnlyHint, true, name);
@@ -70,7 +72,7 @@ test('with a signer the server lists simulate, routes and a confirm-first bridge
 test('read-only mode, or no key at all, leaves cashmere_bridge out', async () => {
   for (const options of [{ config: { evm: { privateKey: KEY } }, readOnly: true }, { config: {} }]) {
     const client = await connect(options);
-    assert.deepEqual(await toolNames(client), ['cashmere_simulate', 'cashmere_supported_routes']);
+    assert.deepEqual(await toolNames(client), ['cashmere_simulate', 'cashmere_supported_routes', ...GOATLP_READ]);
     assert.match(client.getInstructions()!, /cannot send transfers/);
     await client.close();
   }
@@ -109,6 +111,23 @@ test('keys come from the CASHMERE_ environment variables, and CASHMERE_MCP_READ_
     assert.throws(() => serverOptionsFromEnv({ CASHMERE_MCP_MAX_AMOUNT: cap }), /CASHMERE_MCP_MAX_AMOUNT/, cap);
     assert.throws(() => serverOptionsFromEnv({ CASHMERE_MCP_MAX_TOTAL: cap }), /CASHMERE_MCP_MAX_TOTAL/, cap);
   }
+});
+
+test('Goat LP settings: the Robinhood Chain RPC (https only, never echoed) and the USD caps, set only when given', () => {
+  assert.equal(serverOptionsFromEnv({}).goatlp, undefined);
+  assert.deepEqual(serverOptionsFromEnv({
+    CASHMERE_ROBINHOOD_RPC_URL: 'https://robinhood.example/v2/key-1234567890', CASHMERE_GOATLP_MAX_DEPOSIT_USD: ' 100 ', CASHMERE_GOATLP_MAX_TOTAL_USD: '250.5',
+  }).goatlp, { rpcUrl: 'https://robinhood.example/v2/key-1234567890', maxDepositUsd: 100, maxTotalUsd: 250.5 });
+  assert.throws(() => serverOptionsFromEnv({ CASHMERE_ROBINHOOD_RPC_URL: 'http://robinhood.example/v2/key-1234567890' }), (err: Error) => {
+    assert.equal(err.message, 'CASHMERE_ROBINHOOD_RPC_URL must use https');
+    return true;
+  });
+  for (const cap of ['0', '-1', '1e3', 'lots', '1.234']) {
+    assert.throws(() => serverOptionsFromEnv({ CASHMERE_GOATLP_MAX_DEPOSIT_USD: cap }), /CASHMERE_GOATLP_MAX_DEPOSIT_USD/, cap);
+    assert.throws(() => serverOptionsFromEnv({ CASHMERE_GOATLP_MAX_TOTAL_USD: cap }), /CASHMERE_GOATLP_MAX_TOTAL_USD/, cap);
+  }
+  assert.ok(SECRET_ENV_NAMES.includes('CASHMERE_ROBINHOOD_RPC_URL'), 'deleted from the environment after it is read');
+  assert.equal(redact('URL: https://robinhood.example/v2/key-1234567890 failed', {}, ['https://robinhood.example/v2/key-1234567890']), 'URL: [redacted] failed');
 });
 
 test('RPC and Gas API URLs must use https, and the error leaves the URL out', () => {
@@ -238,7 +257,7 @@ test('arguments are checked before anything runs', async () => {
 
 test('the stdio server starts from the bin without keys, bridge off', async () => {
   const client = await spawn();
-  assert.deepEqual(await toolNames(client), ['cashmere_simulate', 'cashmere_supported_routes']);
+  assert.deepEqual(await toolNames(client), ['cashmere_simulate', 'cashmere_supported_routes', ...GOATLP_READ]);
   assert.equal(client.getServerVersion()?.name, 'cashmere');
   await client.close();
 });

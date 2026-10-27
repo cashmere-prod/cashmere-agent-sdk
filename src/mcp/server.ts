@@ -14,6 +14,13 @@ import {
 } from '../tool-schema';
 import { getSupportedRoutes } from '../utils/supported-routes';
 import { recipientError } from '../utils/address';
+import { createGoatLpContext, type GoatLpDeps, type GoatLpSettings } from '../goatlp/context';
+import { GOATLP_WARNING, registerGoatLpReadTools } from '../goatlp/tools';
+
+/** Goat LP settings of the MCP server, and replaceable parts for tests */
+export interface GoatLpServerOptions extends GoatLpSettings {
+  deps?: GoatLpDeps;
+}
 
 export interface CashmereMcpServerOptions {
   config: CashmereCCTPConfig;
@@ -29,6 +36,8 @@ export interface CashmereMcpServerOptions {
   cctp?: Pick<CashmereCCTP, 'simulate' | 'transfer'>;
   // Milliseconds since the epoch; tests move it
   now?: () => number;
+  // Goat LP on Robinhood Chain: the RPC and the USD caps of goatlp_add_liquidity
+  goatlp?: GoatLpServerOptions;
 }
 
 const SIGNERS = ['evm', 'solana', 'aptos', 'sui'] as const;
@@ -36,13 +45,21 @@ const SIGNERS = ['evm', 'solana', 'aptos', 'sui'] as const;
 // must not turn into a wallet the agent can spend from
 const ENV_PREFIX = { evm: 'CASHMERE_EVM', solana: 'CASHMERE_SOLANA', aptos: 'CASHMERE_APTOS', sui: 'CASHMERE_SUI' } as const;
 // Keys, and RPC URLs, which often carry an API key
-export const SECRET_ENV_NAMES = SIGNERS.flatMap(chain => [`${ENV_PREFIX[chain]}_PRIVATE_KEY`, `${ENV_PREFIX[chain]}_RPC_URL`]);
+export const SECRET_ENV_NAMES = [
+  ...SIGNERS.flatMap(chain => [`${ENV_PREFIX[chain]}_PRIVATE_KEY`, `${ENV_PREFIX[chain]}_RPC_URL`]),
+  'CASHMERE_ROBINHOOD_RPC_URL',
+];
+const USD_AMOUNT = /^\d+(\.\d{1,2})?$/;
 const OFF = ['', '0', 'false', 'no', 'off'];
 const USDC_AMOUNT = /^\d+(\.\d{1,6})?$/;
 const DUPLICATE_WINDOW_MS = 10 * 60 * 1000;
 
 // src/mcp and dist/mcp both sit two levels below package.json
 const { version } = JSON.parse(readFileSync(join(__dirname, '..', '..', 'package.json'), 'utf8')) as { version: string };
+
+const GOATLP_INSTRUCTIONS = 'Goat LP (Uniswap v3 and v4 liquidity on Robinhood Chain, chain 4663): goatlp_pools, goatlp_pool, '
+  + 'goatlp_positions and goatlp_position show pools with their APR, TVL and volume, positions, and the auto-compound, auto-range '
+  + `and auto-exit rules; they are read-only. ${GOATLP_WARNING}`;
 
 const INSTRUCTIONS = 'Cashmere moves USDC between 17 chains (Ethereum, Base, Arbitrum, Optimism, Polygon, Avalanche, '
   + 'Unichain, Linea, Worldchain, Sei, Sonic, HyperEVM, Monad, Arc, Solana, Aptos, Sui) over Circle CCTP: cross-chain '
@@ -91,6 +108,20 @@ export function serverOptionsFromEnv(env: NodeJS.ProcessEnv = process.env): Cash
   const maxTotal = amount('CASHMERE_MCP_MAX_TOTAL');
   const allowedRecipients = read('CASHMERE_MCP_ALLOWED_RECIPIENTS')?.split(',').map(r => r.trim()).filter(Boolean);
   const config: CashmereCCTPConfig = { gasApiUrl: checkedUrl('CASHMERE_GAS_API_URL', read('CASHMERE_GAS_API_URL')) };
+  const usd = (name: string) => {
+    const value = read(name);
+    if (value !== undefined && (!USD_AMOUNT.test(value) || Number(value) <= 0)) {
+      throw new Error(`${name} is "${value}": set a USD amount such as "100" or "25.5"`);
+    }
+    return value === undefined ? undefined : Number(value);
+  };
+  const goatlp: GoatLpServerOptions = {};
+  const rpcUrl = checkedUrl('CASHMERE_ROBINHOOD_RPC_URL', read('CASHMERE_ROBINHOOD_RPC_URL'));
+  if (rpcUrl !== undefined) goatlp.rpcUrl = rpcUrl;
+  const maxDepositUsd = usd('CASHMERE_GOATLP_MAX_DEPOSIT_USD');
+  if (maxDepositUsd !== undefined) goatlp.maxDepositUsd = maxDepositUsd;
+  const maxTotalUsd = usd('CASHMERE_GOATLP_MAX_TOTAL_USD');
+  if (maxTotalUsd !== undefined) goatlp.maxTotalUsd = maxTotalUsd;
 
   // A read-only server does not even read the keys
   if (!readOnly) {
@@ -100,7 +131,7 @@ export function serverOptionsFromEnv(env: NodeJS.ProcessEnv = process.env): Cash
       if (privateKey) config[chain] = { privateKey, rpcUrl };
     }
   }
-  return { config, readOnly, maxAmount, maxTotal, allowedRecipients };
+  return { config, readOnly, maxAmount, maxTotal, allowedRecipients, ...(Object.keys(goatlp).length ? { goatlp } : {}) };
 }
 
 // Every configured private key in the spellings a library might echo back, longest first
@@ -120,8 +151,13 @@ function secretPatterns(config: CashmereCCTPConfig): RegExp[] {
     .map(secret => new RegExp(secret.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'));
 }
 
-export function redact(text: string, config: CashmereCCTPConfig): string {
-  return secretPatterns(config).reduce((out, pattern) => out.replace(pattern, '[redacted]'), text);
+export function redact(text: string, config: CashmereCCTPConfig, extra: readonly (string | undefined)[] = []): string {
+  // extra secrets: RPC URLs that may carry an API key
+  const more = extra
+    .filter((s): s is string => typeof s === 'string' && s.length >= 16)
+    .sort((a, b) => b.length - a.length)
+    .map(s => new RegExp(s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'));
+  return [...more, ...secretPatterns(config)].reduce((out, pattern) => out.replace(pattern, '[redacted]'), text);
 }
 
 function sources(config: CashmereCCTPConfig): Network[] {
@@ -156,13 +192,21 @@ export function createCashmereMcpServer(options: CashmereMcpServerOptions): McpS
   const cctp = options.cctp ?? new CashmereCCTP(config);
   const bridge = bridgeEnabled(options);
 
+  const goatSecrets = [options.goatlp?.rpcUrl, ...SIGNERS.map(chain => config[chain]?.rpcUrl)];
+  const goat = createGoatLpContext({
+    privateKey: readOnly ? null : config.evm?.privateKey ?? null,
+    settings: options.goatlp,
+    deps: options.goatlp?.deps,
+  });
+
   const server = new McpServer({ name: 'cashmere', version }, {
-    instructions: bridge
+    instructions: (bridge
       ? `${INSTRUCTIONS} cashmere_bridge sends a real transfer from the configured wallet: run cashmere_simulate first, `
         + 'show the user the amount, source chain, destination chain and recipient, and call it only after the user '
         + 'confirms them. Never retry a failed transfer without asking the user.'
       : `${INSTRUCTIONS} This server cannot send transfers: cashmere_bridge is off because `
-        + (readOnly ? 'CASHMERE_MCP_READ_ONLY is set.' : 'no signer private key is configured.'),
+        + (readOnly ? 'CASHMERE_MCP_READ_ONLY is set.' : 'no signer private key is configured.'))
+      + ` ${GOATLP_INSTRUCTIONS}`,
   });
 
   const run = async (call: () => unknown): Promise<CallToolResult> => {
@@ -173,6 +217,8 @@ export function createCashmereMcpServer(options: CashmereMcpServerOptions): McpS
       return { content: [{ type: 'text', text: redact(message, config) }], isError: true };
     }
   };
+
+  registerGoatLpReadTools(server, goat, (text) => redact(text, config, goatSecrets));
 
   server.registerTool('cashmere_supported_routes', {
     title: 'Cashmere supported routes',

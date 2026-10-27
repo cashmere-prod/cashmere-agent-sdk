@@ -1,0 +1,60 @@
+{
+ "0x0000000000000000000000000000000000000000": {
+  "network": "robinhood",
+  "address": "0x0000000000000000000000000000000000000000",
+  "symbol": "ETH",
+  "name": "Ethereum",
+  "decimals": 18,
+  "is_native": true,
+  "price": 2309.232899650865,
+  "prices": {
+   "eth": 1,
+   "usd": 2309.232899650865
+  },
+  "logo_url": "https://api.cashmere.exchange/v2/token-logo/5fde5cbdb02fddfdb5bc249bc2823c6404f44ace7c7c8304f551542a5cb7750f.png",
+  "logo_source": "override",
+  "ticker_collision": false,
+  "price_flag": "GUARDED",
+  "price_backing_usd": null,
+  "price_zero_reason": null,
+  "price_ceiling_usd": 247712.6049141872,
+  "above_ceiling_price": false,
+  "price_venue": "v4",
+  "price_source_pool": null,
+  "price_status": "GUARDED",
+  "price_source": "guarded",
+  "counterparty": null,
+  "score_eth": 0,
+  "held_price_usd": null,
+  "price_updated_ts": 1781822609
+ },
+ "0x5fc5360d0400a0fd4f2af552add042d716f1d168": {
+  "network": "robinhood",
+  "address": "0x5fc5360d0400a0fd4f2af552add042d716f1d168",
+  "symbol": "USDG",
+  "name": "Global Dollar",
+  "decimals": 6,
+  "is_native": false,
+  "price": 1,
+  "prices": {
+   "eth": 0.0004330442373964059,
+   "usd": 1
+  },
+  "logo_url": "https://api.cashmere.exchange/v2/token-logo/ac792ac35ee887bca7e44cee2df7ec11687c97edd3a5a510bfa79fa507123134.png",
+  "logo_source": "coingecko",
+  "ticker_collision": false,
+  "price_flag": "GUARDED",
+  "price_backing_usd": null,
+  "price_zero_reason": null,
+  "price_ceiling_usd": 247712.6049141872,
+  "above_ceiling_price": false,
+  "price_venue": "v4",
+  "price_source_pool": null,
+  "price_status": "GUARDED",
+  "price_source": "guarded",
+  "counterparty": null,
+  "score_eth": 0,
+  "held_price_usd": null,
+  "price_updated_ts": 1780996373
+ }
+}

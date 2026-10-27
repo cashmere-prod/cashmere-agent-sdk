@@ -1,0 +1,128 @@
+[
+ {
+  "type": "gas-costs",
+  "timestamp": 1792972698,
+  "block_number": 97983846,
+  "tx_hash": "0x13109730ab4f4d81871bcb052078c2255d5b7a8bce580157f86333cbd093f80a",
+  "log_index": null,
+  "owner": "0x4178b8f0469d5efee99fd07f0c3deff5ca2bb52f",
+  "payer": "0x9729585607568dcbf1f5f3802afbf5b221702932",
+  "amount": "-0.0000171877",
+  "amount_usd": -0.04000719661663122,
+  "gas_used": 859385,
+  "gas_price": 2e-11,
+  "with_receipt": true,
+  "prices": {
+   "native_token": {
+    "usd": 2327.6643539642428,
+    "eth": 1,
+    "token0": 1,
+    "token1": 2327.6643539642428
+   }
+  }
+ },
+ {
+  "type": "transfer",
+  "timestamp": 1792972698,
+  "block_number": 97983846,
+  "tx_hash": "0x13109730ab4f4d81871bcb052078c2255d5b7a8bce580157f86333cbd093f80a",
+  "log_index": 83,
+  "owner": "0x4178b8f0469d5efee99fd07f0c3deff5ca2bb52f",
+  "from": "0x0000000000000000000000000000000000000000",
+  "to": "0x4178b8f0469d5efee99fd07f0c3deff5ca2bb52f",
+  "liquidity": "0",
+  "prices": {}
+ },
+ {
+  "timestamp": 1792972698,
+  "block_number": 97983846,
+  "tx_hash": "0x13109730ab4f4d81871bcb052078c2255d5b7a8bce580157f86333cbd093f80a",
+  "log_index": 84,
+  "owner": "0x4178b8f0469d5efee99fd07f0c3deff5ca2bb52f",
+  "type": "deposits",
+  "amount0": "-1.211463700735674656",
+  "amount1": "-2863.109961",
+  "amount_usd": -5682.990833324035,
+  "liquidity": "7629398407350629",
+  "prices": {
+   "token0": {
+    "usd": 2327.6643539642428,
+    "eth": 1,
+    "token0": 1,
+    "token1": 2327.6643539642428
+   },
+   "token1": {
+    "usd": 1,
+    "eth": 0.0004296152056016586,
+    "token0": 0.0004296152056016586,
+    "token1": 1
+   },
+   "native_token": {
+    "usd": 2327.6643539642428,
+    "eth": 1,
+    "token0": 1,
+    "token1": 2327.6643539642428
+   }
+  }
+ },
+ {
+  "timestamp": 1793092368,
+  "block_number": 99130245,
+  "tx_hash": null,
+  "log_index": null,
+  "owner": "0x4178b8f0469d5efee99fd07f0c3deff5ca2bb52f",
+  "current": true,
+  "type": "unclaimed-fees-state",
+  "amount0": "0.017308612479300582",
+  "amount1": "42.46762",
+  "amount_usd": 82.43723738450842,
+  "liquidity": "7629398407350629",
+  "prices": {
+   "token0": {
+    "usd": 2309.232899650865,
+    "eth": 1,
+    "token0": 1,
+    "token1": 2309.232899650865
+   },
+   "token1": {
+    "usd": 1,
+    "eth": 0.0004330442373964059,
+    "token0": 0.0004330442373964059,
+    "token1": 1
+   }
+  }
+ },
+ {
+  "timestamp": 1793092368,
+  "block_number": 99130245,
+  "tx_hash": null,
+  "log_index": null,
+  "owner": "0x4178b8f0469d5efee99fd07f0c3deff5ca2bb52f",
+  "current": true,
+  "type": "current-amount-state",
+  "amount0": "1.753272936746331785",
+  "amount1": "1607.494612",
+  "amount_usd": 5656.210159602119,
+  "liquidity": "7629398407350629",
+  "prices": {
+   "token0": {
+    "usd": 2309.232899650865,
+    "eth": 1,
+    "token0": 1,
+    "token1": 2309.232899650865
+   },
+   "token1": {
+    "usd": 1,
+    "eth": 0.0004330442373964059,
+    "token0": 0.0004330442373964059,
+    "token1": 1
+   },
+   "native_token": {
+    "usd": 2309.232899650865,
+    "eth": 1,
+    "token0": 1,
+    "token1": 2309.232899650865
+   }
+  }
+ }
+]
