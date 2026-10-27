@@ -127,6 +127,8 @@ export function registerGoatLpWriteTools(server: McpServer, ctx: GoatLpContext, 
       if (!input.execute) {
         return run(async () => {
           if (!signer) throw new Error('Not planned: this server has no wallet configured.');
+          const wiring = await ctx.wiring();
+          if (wiring) throw new Error(`Not planned: ${wiring}`);
           const nowSec = ctx.nowSec();
           const plan = await build(input, { nowSec });
           await planSimulation(ctx.chain, signer.address, plan.steps);
@@ -137,7 +139,8 @@ export function registerGoatLpWriteTools(server: McpServer, ctx: GoatLpContext, 
             planId: rec.id, expiresAt, wallet: signer.address, ...plan.view,
             steps: plan.steps.map((s, i) => ({ step: i + 1, action: s.label, ...s.view })),
             warning: GOATLP_WARNING,
-            next: `Nothing was sent. Show this plan to the user. Only after the user confirms it, call ${tool} again with the same inputs plus execute: true and planId "${rec.id}" (valid until ${expiresAt}).`,
+            next: plan.next ? `Nothing was sent. ${plan.next}`
+              : `Nothing was sent. Show this plan to the user. Only after the user confirms it, call ${tool} again with the same inputs plus execute: true and planId "${rec.id}" (valid until ${expiresAt}).`,
           };
         });
       }
@@ -145,6 +148,8 @@ export function registerGoatLpWriteTools(server: McpServer, ctx: GoatLpContext, 
         if (extra.signal.aborted) throw new Error('Not sent: the request was cancelled before the plan started.');
         if (!signer) throw new Error('Not sent: this server has no wallet configured.');
         if (!input.planId) throw new Error('Not sent: execute: true needs the planId of the plan the user confirmed. Call without execute first.');
+        const wiring = await ctx.wiring();
+        if (wiring) throw new Error(`Not sent: ${wiring}`);
         const rec = store.take(input.planId, tool, inputKeyOf(input as Record<string, unknown>));
         const plan = await build(input, rec.basis);
         if (fingerprintOf(plan.steps, plan.fingerprintExtra) !== rec.fingerprint) {
@@ -261,7 +266,9 @@ export function registerGoatLpWriteTools(server: McpServer, ctx: GoatLpContext, 
       + 'approved to the position manager for exactly this deposit; payWithEth pays the WETH side with ETH (unused ETH comes back). v4: pools '
       + 'without a hook only; tokens go through Permit2 with an exact allowance that lasts 30 minutes; native ETH goes with the call and unused '
       + 'ETH comes back. Refused: a token that copies an official stock ticker, a token that takes a fee when it moves, and a pool price more '
-      + `than 5% away from Chainlink.${limits} ${TWO_STEP}`,
+      + 'than 5% away from Chainlink. When the pool price is more than 1% from Chainlink, the plan lists acknowledge lines: execute refuses '
+      + 'that plan; show the lines to the user, and after a yes plan again with acknowledge: true and execute the new plan.'
+      + `${limits} ${TWO_STEP}`,
     inputSchema: {
       venue,
       id: positionId.optional().describe('Add to this position (the configured wallet must own it)'),
@@ -275,6 +282,7 @@ export function registerGoatLpWriteTools(server: McpServer, ctx: GoatLpContext, 
       slippageBps: z.number().int().min(DEPOSIT_SLIPPAGE_MIN_BPS).max(DEPOSIT_SLIPPAGE_MAX_BPS).optional()
         .describe('v3 only: the price move the minimums allow, in bps (default 100 = 1%, at most 300)'),
       payWithEth: z.boolean().optional().describe('v3 only: pay the WETH side with ETH'),
+      acknowledge: z.boolean().optional().describe('The user agreed to the acknowledge lines of the plan; plan again with it, then execute that plan'),
       ...planFields,
     },
     ...writeMeta,

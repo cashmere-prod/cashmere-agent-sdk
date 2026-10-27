@@ -9,7 +9,7 @@
 //   hand-over:   the signed messages go to the keeper store
 import { decodeErrorResult, keccak256, stringToHex, type Abi, type Address, type Hex } from 'viem';
 import { GOAT_ERROR_ABIS } from './abis';
-import { txUrl, type GoatChain, type GoatSigner, type TxReceipt } from './chain';
+import { addressUrl, isNotBroadcast, txUrl, type GoatChain, type GoatSigner, type TxReceipt } from './chain';
 import { PLAN_TTL_MS } from './constants';
 import { ERROR_TEXT, TX_FAILED } from './copy';
 
@@ -27,6 +27,8 @@ export interface TxStep {
   verify?: () => Promise<string | null>;
   /** right before the transaction is signed and sent (bookkeeping such as the add-liquidity total) */
   onSend?: () => void;
+  /** after a send that failed before the transaction left the wallet (nothing reached the chain) */
+  onNotSent?: () => void;
   /** after a receipt that says the transaction reverted */
   onRevert?: () => void;
   /** after a confirmed receipt */
@@ -53,6 +55,8 @@ export interface BuiltPlan {
   basis?: Record<string, unknown>;
   /** more of the plan's identity than its steps (such as what the user must acknowledge) */
   fingerprintExtra?: string;
+  /** what the agent must do next instead of the usual "confirm, then execute" (a plan that cannot be executed as it is) */
+  next?: string;
 }
 
 /** The plan's clock (unix seconds) and what else the rebuild keeps */
@@ -172,7 +176,13 @@ export async function executeSteps(chain: GoatChain, signer: GoatSigner, steps: 
     let hash: Hex;
     s.onSend?.();
     try { hash = await signer.sendTransaction({ to: s.to, data: s.data, value: s.value }); } catch (e) {
-      throw new Error(`Step ${step} (${s.label}) was not sent: ${revertText(e)}${doneText()}`);
+      const why = revertText(e).replace(/\.?$/, '.');
+      if (isNotBroadcast(e)) {
+        s.onNotSent?.();
+        throw new Error(`Step ${step} (${s.label}) was not sent: ${why}${doneText()}`);
+      }
+      // the RPC may have taken it: the outcome is unknown
+      throw new Error(`Step ${step} (${s.label}) may have been sent: ${why} Check the wallet on the explorer (${addressUrl(signer.address)}) before trying again.${doneText()}`);
     }
     let receipt: TxReceipt;
     try { receipt = await chain.waitReceipt(hash); } catch (e) {

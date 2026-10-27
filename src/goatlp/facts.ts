@@ -11,7 +11,7 @@ import {
 } from './abis';
 import {
   AUTO_EXIT_V3, AUTO_RANGE_V3, GOAT_AUTO_COMPOUND_V3, GOAT_AUTO_COMPOUND_V4, GOAT_CHAIN_ID, GOAT_PAIR_TABLE, GOAT_PRICE_ANCHOR,
-  GOAT_TREASURY, GOAT_V4_COMPOUNDOR, GOAT_V4_PAIR_REGISTRY, GOAT_V4_STEWARD, GOAT_V4_STEWARD_ENGINE, NC_SRC_KINDS, NPM, PINS, POSM,
+  GOAT_TREASURY, GOAT_V4_COMPOUNDOR, GOAT_V4_PAIR_REGISTRY, GOAT_V4_STEWARD, GOAT_V4_STEWARD_ENGINE, NC_SRC_KINDS, NPM, PINS, POOL_MANAGER, POSM,
   ST_MODE, V3_FACTORY, WETH, ZERO_ADDRESS, type PinKey,
 } from './constants';
 import { checkPins, type GoatChain, type McCall, type McRes, type PinResult } from './chain';
@@ -387,6 +387,25 @@ export function isBurnedError(r: McRes | undefined): boolean {
   if (!r || r.status !== 'failure') return false;
   const e = r.error as { message?: string; shortMessage?: string; cause?: { message?: string } } | undefined;
   return BURNED_RE.test([e?.shortMessage, e?.message, e?.cause?.message, String(e)].filter(Boolean).join(' '));
+}
+
+/**
+ * The position managers' own wiring: the v4 PositionManager's pool manager and the v3 position manager's factory must be the
+ * addresses pinned in this package. Why not (a different address, or a failed read), or null.
+ */
+export async function checkWiring(chain: GoatChain): Promise<string | null> {
+  let pm: Address, factory: Address;
+  try {
+    [pm, factory] = await Promise.all([
+      chain.read<Address>({ address: POSM, abi: posmAbi, functionName: 'poolManager' }),
+      chain.read<Address>({ address: NPM, abi: npmAbi, functionName: 'factory' }),
+    ]);
+  } catch {
+    return "couldn't read the pool manager and the factory the Uniswap position managers use.";
+  }
+  if (pm.toLowerCase() !== POOL_MANAGER.toLowerCase()) return `the Uniswap v4 PositionManager uses the pool manager ${pm}, not ${POOL_MANAGER} as pinned in this package.`;
+  if (factory.toLowerCase() !== V3_FACTORY.toLowerCase()) return `the Uniswap v3 NonfungiblePositionManager uses the factory ${factory}, not ${V3_FACTORY} as pinned in this package.`;
+  return null;
 }
 
 /** v4 PositionInfo: ticks at bits 8 and 32 (int24), the subscriber flag in the low byte */

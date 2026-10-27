@@ -6,8 +6,8 @@
 //  - v3: mint / increaseLiquidity, or multicall([mint | increaseLiquidity, refundETH()]) when the WETH side is paid with ETH;
 //  - v4: modifyLiquidities with exactly MINT_POSITION + SETTLE_PAIR or INCREASE_LIQUIDITY + CLOSE_CURRENCY x2, plus
 //    SWEEP(ETH, wallet) in a pool of native ETH.
-// The position goes to the wallet, the pool and range are the plan's, minimums never exceed the amounts, the deadline is
-// in the future and within 30 minutes, and ETH is sent only where the plan pays ETH. Never setApprovalForAll, permitForAll,
+// The position goes to the wallet, the pool, range and amounts are the plan's, minimums never exceed the amounts, the
+// deadline is in the future and within 30 minutes, and ETH is sent only where the plan pays ETH. Never setApprovalForAll, permitForAll,
 // a transfer of anything, or a call to any other contract.
 import { decodeAbiParameters, decodeFunctionData, toFunctionSelector, type Address, type Hex } from 'viem';
 import { erc20Abi, npmAbi, permit2Abi, posmAbi } from './abis';
@@ -41,6 +41,8 @@ export interface LpPlanned {
   ethSide: 0 | 1 | null;
   /** the ETH value of the deposit */
   value: bigint;
+  /** the amounts the deposit may take: v3 the desired amounts, v4 the maxima */
+  need: readonly [bigint, bigint];
 }
 
 export type LpVerdict = { ok: true } | { ok: false; rule: string; reason: string };
@@ -138,6 +140,7 @@ function checkV3(tx: { to: Address; data: Hex; value: bigint }, x: LpPlanned): L
     if (x.tokenId === undefined || p.tokenId !== x.tokenId) return no('position', 'wrong position id');
     desired = [p.amount0Desired, p.amount1Desired]; mins = [p.amount0Min, p.amount1Min]; deadline = p.deadline;
   }
+  if (desired[0] !== x.need[0] || desired[1] !== x.need[1]) return no('amounts', 'the deposit amounts differ from the plan');
   if (mins[0] > desired[0] || mins[1] > desired[1]) return no('minimums', 'a minimum above the amount');
   if (!deadlineOk(deadline, x.nowSec)) return no('deadline', 'the deadline must be in the future and within 30 minutes');
   if (x.ethSide !== null) {
@@ -170,6 +173,7 @@ function checkV4(tx: { to: Address; data: Hex; value: bigint }, x: LpPlanned): L
       if ((m[3] as bigint) <= 0n) return no('actions', 'the mint adds no liquidity');
       if (!eq(m[6] as Address, x.account)) return no('recipient', 'the new position would not go to the wallet');
       if (m[7] !== '0x') return no('hook-data', 'unexpected hook data');
+      if (m[4] !== x.need[0] || m[5] !== x.need[1]) return no('amounts', 'the deposit amounts differ from the plan');
       max0 = m[4] as bigint;
       const [s0, s1] = decodeAbiParameters(V4_PARAMS.settlePair, params[1]);
       if (!eq(s0, x.key.currency0) || !eq(s1, x.key.currency1)) return no('actions', 'SETTLE_PAIR names other tokens than the pool');
@@ -178,6 +182,7 @@ function checkV4(tx: { to: Address; data: Hex; value: bigint }, x: LpPlanned): L
       if (x.tokenId === undefined || p[0] !== x.tokenId) return no('position', 'wrong position id');
       if ((p[1] as bigint) <= 0n) return no('actions', 'the increase adds no liquidity');
       if (p[4] !== '0x') return no('hook-data', 'unexpected hook data');
+      if (p[2] !== x.need[0] || p[3] !== x.need[1]) return no('amounts', 'the deposit amounts differ from the plan');
       max0 = p[2] as bigint;
       const [c0] = decodeAbiParameters(V4_PARAMS.close, params[1]);
       const [c1] = decodeAbiParameters(V4_PARAMS.close, params[2]);

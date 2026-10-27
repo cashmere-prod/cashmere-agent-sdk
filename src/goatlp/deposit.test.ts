@@ -9,6 +9,7 @@ import { decodeAbiParameters, decodeFunctionData, toFunctionSelector, type Abi, 
 import { createCashmereMcpServer, type CashmereMcpServerOptions } from '../mcp/server';
 import { erc20Abi, npmAbi, permit2Abi, posmAbi } from './abis';
 import { GoatApi } from './api';
+import { NotBroadcastError } from './chain';
 import { NPM, PERMIT2, POSM } from './constants';
 import { Actions, REFUND_ETH, V4_PARAMS, decodeUnlockData } from './lp/encode';
 import { rangeAroundPrice } from './lp/liquidity';
@@ -324,5 +325,57 @@ test('nothing a deposit sends is a permission for all, a transfer or an unlimite
     if (t.to === PERMIT2) assert.ok((fn(permit2Abi, t.data).args[2] as bigint) < 10n ** 30n);
     else if (t.to !== NPM && t.to !== POSM) assert.ok((fn(erc20Abi, t.data).args[1] as bigint) < 10n ** 30n, 'an exact amount');
   }
+  await c.close();
+});
+
+test('acknowledge lines bind the plan: execute refuses a plan made without acknowledge: true, and one made with it goes through', async () => {
+  const s = setup({ ethPrice: ETH_USD * 1.02 });
+  const c = await connect(s.options);
+  const args = { venue: 'v3', pool: WETH_USDG_V3, rangePct: 5, amount0: '0.1' };
+  const plan = await call(c, args);
+  assert.deepEqual(plan.acknowledge, ['I understand that the pool price is 1.96% from Chainlink.']);
+  assert.equal(plan.acknowledged, false);
+  assert.match(String(plan.next), /^Nothing was sent\. This plan cannot be executed as it is: .* plus acknowledge: true, and execute that new plan\.$/);
+  assert.match(String((await call(c, { ...args, execute: true, planId: plan.planId })).error), /^Not sent: this deposit has lines the user must acknowledge \(I understand that the pool price is 1\.96% from Chainlink\.\)/);
+  // acknowledge is one of the inputs a plan is bound to: it cannot be added at execute
+  const again = await call(c, args);
+  assert.match(String((await call(c, { ...args, acknowledge: true, execute: true, planId: again.planId })).error), /inputs differ/);
+  assert.equal(s.signer.sent.length, 0);
+  const ack = await call(c, { ...args, acknowledge: true });
+  assert.equal(ack.acknowledged, true);
+  assert.match(String(ack.next), /^Nothing was sent\. Show this plan to the user\./);
+  const done = await call(c, { ...args, acknowledge: true, execute: true, planId: ack.planId });
+  assert.equal(done.error, undefined, String(done.error));
+  assert.equal(s.signer.sent.at(-1)!.to, NPM);
+  await c.close();
+});
+
+test('the total limit counts a deposit once it may have left the wallet: given back when the send failed before the RPC, kept when the outcome is unknown', async () => {
+  const args = { venue: 'v3', id: String(V3_POS), amount0: '1', amount1: '300' };
+  const ready = (s: ReturnType<typeof setup>) => {
+    const me = s.signer.address.toLowerCase();
+    for (const t of [AMZN, USDG_T]) s.lp.allowance.set(`${t}:${me}:${NPM.toLowerCase()}`, 10n ** 30n);
+  };
+  // not broadcast: the plan can be made again within the limit
+  const s = setup({ limits: { maxTotalUsd: 700 } });
+  ready(s);
+  s.signer.sendTransaction = async () => { throw new NotBroadcastError(new Error('insufficient funds for gas')); };
+  let c = await connect(s.options);
+  let plan = await call(c, args);
+  let done = await call(c, { ...args, execute: true, planId: plan.planId });
+  assert.match(String(done.error), /^Step 1 \(Add liquidity\) was not sent: insufficient funds for gas\. Nothing was sent\.$/);
+  plan = await call(c, args);
+  assert.equal(plan.error, undefined, 'given back');
+  assert.equal((plan.limits as Record<string, number>).depositedSoFarUsd, 0);
+  await c.close();
+  // unknown outcome: it stays counted
+  const u = setup({ limits: { maxTotalUsd: 700 } });
+  ready(u);
+  u.signer.sendTransaction = async () => { throw new Error('the RPC timed out'); };
+  c = await connect(u.options);
+  plan = await call(c, args);
+  done = await call(c, { ...args, execute: true, planId: plan.planId });
+  assert.match(String(done.error), /^Step 1 \(Add liquidity\) may have been sent: the RPC timed out\. Check the wallet on the explorer \(https:\/\/robin\.etherscan\.io\/address\/0x[0-9a-fA-F]{40}\) before trying again\. Nothing was sent\.$/);
+  assert.match(String((await call(c, args)).error), /this server has deposited about \d+\.\d\d USD; \d+\.\d\d more would pass its total limit of 700 USD/);
   await c.close();
 });

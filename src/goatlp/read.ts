@@ -103,8 +103,8 @@ export async function poolsTool(ctx: GoatLpContext, input: PoolsInput) {
     try {
       const env = await ctx.env();
       const facts = rows.map(poolFactsOfDiscover);
-      const [loaded, policy, keeper] = await Promise.all([
-        loadPoolFacts(ctx.chain, facts.filter((f): f is PoolFacts => !!f), env), readPolicy(ctx.api), readKeeperStatus(ctx.api, ctx.nowSec()),
+      const [loaded, keeper] = await Promise.all([
+        loadPoolFacts(ctx.chain, facts.filter((f): f is PoolFacts => !!f), env), readKeeperStatus(ctx.api, ctx.nowSec()),
       ]);
       automation = new Map();
       let j = 0;
@@ -112,7 +112,7 @@ export async function poolsTool(ctx: GoatLpContext, input: PoolsInput) {
         if (!facts[i]) return;
         const f = loaded[j++];
         f.sizeLimit = sizeLimitOf(keeper, f.venue, f.token0, f.token1);
-        automation!.set(lc(p.address), poolVerdict(f, env.gates, { switches: policy?.switches }));
+        automation!.set(lc(p.address), poolVerdict(f, env.gates));
       });
     } catch (e) {
       automationNote = chainNote(e);
@@ -204,9 +204,9 @@ export async function poolTool(ctx: GoatLpContext, input: PoolInput) {
   let fees: ReturnType<typeof feesText> | undefined;
   try {
     const env = await ctx.env();
-    const [[f], policy, keeper] = await Promise.all([loadPoolFacts(ctx.chain, [facts], env, { caps: true }), readPolicy(ctx.api), readKeeperStatus(ctx.api, ctx.nowSec())]);
+    const [[f], keeper] = await Promise.all([loadPoolFacts(ctx.chain, [facts], env, { caps: true }), readKeeperStatus(ctx.api, ctx.nowSec())]);
     f.sizeLimit = sizeLimitOf(keeper, f.venue, f.token0, f.token1);
-    const v = poolVerdict(f, env.gates, { switches: policy?.switches });
+    const v = poolVerdict(f, env.gates);
     hook = hookStatus(f);
     fees = feesText(env.contracts, input.venue);
     automation = Object.fromEntries((['compound', 'range', 'exit'] as const).map((k) => [kindKey[k], { ...verdictSummary(v.kinds[k]), ...limitsOf(k, v.kinds[k]) }]));
@@ -431,7 +431,7 @@ export async function positionTool(ctx: GoatLpContext, input: PositionInput) {
     const minUsd = policy?.minUsd ?? RANGE_MIN_MOVABLE_USD;
     const account = ctx.account ?? (owner !== 'unknown' ? owner : undefined);
     if (pf) pf.sizeLimit = sizeLimitOf(keeper, pf.venue, pf.token0, pf.token1);
-    const verdict = pf ? positionVerdict(poolVerdict(pf, env.gates, { switches: policy?.switches }), f, { account: account ?? undefined, onKinds, contracts: env.contracts, valueUsd: api?.underlying_value ?? undefined, minUsd }) : null;
+    const verdict = pf ? positionVerdict(poolVerdict(pf, env.gates), f, { account: account ?? undefined, onKinds, contracts: env.contracts, valueUsd: api?.underlying_value ?? undefined, minUsd }) : null;
     const approved = f.approved;
     const spenderKey = approved && approved !== 'unknown' ? isGoatSpender(approved, env.contracts.spenders ?? {}) : null;
     const keeperRows = (['compound', 'range', 'exit'] as const).map((k) => [k, keeperStatusOf(keeper, id, input.venue, k)] as const).filter(([, r]) => r);

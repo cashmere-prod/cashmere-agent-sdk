@@ -1,5 +1,5 @@
-// The keeper's size limit per pair and its advice keys, the served switches, the thin-pool list, and the sessions a v4
-// auto-compound stop cancels when the keeper store, this server's record and the chain disagree.
+// The keeper's size limit per pair and its advice keys, the thin-pool list, and the sessions a v4 auto-compound stop
+// cancels when the keeper store, this server's record and the chain disagree.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Address } from 'viem';
@@ -8,7 +8,6 @@ import { poolVerdict } from './eligibility';
 import { isThinCompoundPool } from './hooks';
 import { normaliseStatus, pairRowOf, pairRowsOf, sizeLimitOf, statusFileOf } from './keeper';
 import { nonceOf, revokeSet, sessionUnion } from './permits';
-import { switchesOf } from './policy';
 import type { PoolFacts } from './types';
 import { GATES_OK, NOW_SEC } from './__fixtures__/kit';
 
@@ -41,27 +40,13 @@ test('advice keys: a cap-exceeded or exit-only row carries the "withdraw only" a
   assert.equal(normaliseStatus({ tokenId: '1', status: 'ok' })?.adviceKey, undefined);
 });
 
-test('served switches: a live or enabled map in any of the plain shapes; only booleans count, and an off stays off', () => {
-  assert.deepEqual(switchesOf({ live: { v4: { range: false, exit: true } } }), { v4: { range: false, exit: true } });
-  assert.deepEqual(switchesOf({ enabled: { compound: { v3: false } } }), { v3: { compound: false } });
-  assert.deepEqual(switchesOf({ enabled: { range_v4: false, 'v3:exit': false } }), { v3: { exit: false }, v4: { range: false } });
-  assert.deepEqual(switchesOf({ automation: { live: { exit: false } } }), { v3: { exit: false }, v4: { exit: false } }, 'a kind alone: both venues');
-  assert.deepEqual(switchesOf({ live: { v4: { range: false } }, enabled: { v4: { range: true } } }), { v4: { range: false } });
-  assert.deepEqual(switchesOf({ live: { v4: { range: 'off' } }, keeper: {} }), {});
-  assert.deepEqual(switchesOf(null), {});
-});
-
 const v3pool: PoolFacts = {
   venue: 'v3', token0: AMZN as Address, token1: USDG as Address, fee: 3000, tickSpacing: 60, pool: '0x8ac92da74ab5f3b1d024dc1943ad7e15dc4179ef',
   compoundAnchor: { chainlinkBoth: true, anchorPool: false }, v3Coverage: { pairListed: true, feeCovered: true, swapsOpen: true, gate: 101 },
   redListed: false, transferTax: false,
 };
 
-test('the switch, the thin-pool list and the size limit in the pool verdict', () => {
-  const off = poolVerdict(v3pool, GATES_OK, { switches: { v3: { range: false } } });
-  assert.equal(off.kinds.range.live, false);
-  assert.equal(off.kinds.range.lines[0].why, ELIG.SWITCHED_OFF);
-  assert.equal(off.kinds.compound.live, true);
+test('the thin-pool list and the size limit in the pool verdict', () => {
   // the thin-pool list is empty today; a row closes auto-compound for that pair on that venue, in either token order
   assert.equal(isThinCompoundPool(v3pool), false);
   const thin = [{ label: 'USDG/AMZN v3', venue: 'v3' as const, a: USDG, b: AMZN }];
@@ -81,7 +66,8 @@ test('the switch, the thin-pool list and the size limit in the pool verdict', ()
   // waiting: auto-range is not offered; a swap exit waits, the withdraw-only exit is not affected
   const wait = poolVerdict({ ...v3pool, sizeLimit: { state: 'waiting', maxRunUsd: 0, eta: null } }, GATES_OK);
   assert.equal(wait.kinds.range.offered, false);
-  assert.ok(wait.kinds.range.lines.some((l) => l.code === 'SIZE_LIMITED' && l.level === 'block' && l.text === ELIG.SIZE_WAITING_RANGE));
+  assert.ok(wait.kinds.range.lines.some((l) => l.code === 'SIZE_LIMITED' && l.level === 'block' && l.text === "Auto-range isn't offered on this pair right now. Exits without a swap work."));
+  assert.ok(wait.kinds.exit.lines.some((l) => l.code === 'SIZE_LIMITED' && l.level === 'limit' && l.text === 'Swap exits on this pair are paused right now. Withdraw only would act right away.'));
   assert.equal(wait.kinds.exit.offered, true);
   assert.equal(wait.kinds.exit.limits.sizeWaiting, true);
   // a withdraw-only exit (the pair's swaps are closed) gets no size line

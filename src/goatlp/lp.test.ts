@@ -134,11 +134,11 @@ const KEY_ERC: PoolKey = { currency0: SPY, currency1: USDG, fee: 3000, tickSpaci
 const v4x = (over: Partial<LpPlanned> = {}): LpPlanned => ({
   venue: 'v4', kind: 'mint', account: ACCT, chainId: 4663, nowSec: NOW, currencies: [KEY.currency0, KEY.currency1], key: KEY,
   range: { tickLower: -10, tickUpper: 10 }, approvals: [{ token: USDG, spender: PERMIT2, amount: 4n }], permit2: [{ token: USDG, amount: 4n, expiration: NOW + 1800 }],
-  ethSide: null, value: 3n, ...over,
+  ethSide: null, value: 3n, need: [3n, 4n], ...over,
 });
 const v3x = (over: Partial<LpPlanned> = {}): LpPlanned => ({
   venue: 'v3', kind: 'mint', account: ACCT, chainId: 4663, nowSec: NOW, currencies: [WETH, USDG], fee: 500, range: { tickLower: -10, tickUpper: 10 },
-  approvals: [{ token: WETH, spender: NPM, amount: 10n }, { token: USDG, spender: NPM, amount: 20n }], permit2: [], ethSide: null, value: 0n, ...over,
+  approvals: [{ token: WETH, spender: NPM, amount: 10n }, { token: USDG, spender: NPM, amount: 20n }], permit2: [], ethSide: null, value: 0n, need: [10n, 20n], ...over,
 });
 const posmTx = (unlock: Hex, value: bigint, deadline = DL) => ({ to: POSM, data: modifyLiquiditiesData(unlock, deadline), value, chainId: 4663 });
 const fails = (v: ReturnType<typeof assertLpTx>, rule: string, re?: RegExp) => {
@@ -186,6 +186,10 @@ test('decode check, v4: the built mint and increase pass; a mint without SWEEP(E
     encodeAbiParameters(V4_PARAMS.increase, [77n, 9n, 3n, 4n, '0x']), encodeAbiParameters([{ type: 'address' }, { type: 'address' }, { type: 'address' }], [ETH, USDG, EVE])]), 3n);
   fails(assertLpTx(take, inc), 'actions');
   fails(assertLpTx({ ...posmTx(encodeV4Mint(KEY, -10, 10, 7n, 3n, 4n, ACCT), 3n), chainId: 1 }, v4x()), 'chain');
+  // the maxima are the plan's
+  fails(assertLpTx(posmTx(encodeV4Mint(KEY, -10, 10, 7n, 3n, 5n, ACCT), 3n), v4x()), 'amounts', /differ from the plan/);
+  fails(assertLpTx(posmTx(encodeV4Increase(77n, 9n, 3n, 40n, ETH, USDG, ACCT), 3n), inc), 'amounts');
+  fails(assertLpTx(posmTx(encodeV4Mint(KEY, -10, 10, 7n, 2n, 4n, ACCT), 2n), v4x({ value: 2n })), 'amounts');
 });
 
 test('decode check, v3: mint and increase pass; another pool, range, recipient, a zero minimum, a minimum above the amount, ETH, a far deadline refuse', () => {
@@ -200,10 +204,14 @@ test('decode check, v3: mint and increase pass; another pool, range, recipient, 
   fails(assertLpTx(tx(v3MintData({ ...base, amount1Min: 21n })), v3x()), 'minimums', /above the amount/);
   fails(assertLpTx(tx(v3MintData(base), 1n), v3x()), 'value');
   fails(assertLpTx(tx(v3MintData({ ...base, recipient: EVE })), v3x()), 'recipient');
+  // the desired amounts are the plan's
+  fails(assertLpTx(tx(v3MintData({ ...base, amount0Desired: 11n })), v3x()), 'amounts', /differ from the plan/);
+  fails(assertLpTx(tx(v3MintData({ ...base, amount1Desired: 19n, amount1Min: 18n })), v3x()), 'amounts');
   const inc = v3x({ kind: 'increase', tokenId: 5n, range: undefined });
   const ip = { tokenId: 5n, amount0Desired: 10n, amount1Desired: 20n, amount0Min: 9n, amount1Min: 19n, deadline: DL };
   assert.deepEqual(assertLpTx(tx(v3IncreaseData(ip)), inc), { ok: true });
   fails(assertLpTx(tx(v3IncreaseData({ ...ip, tokenId: 6n })), inc), 'position');
+  fails(assertLpTx(tx(v3IncreaseData({ ...ip, amount1Desired: 2000n })), inc), 'amounts');
   fails(assertLpTx(tx(v3MintData(base)), inc), 'function');
   // collect, decrease, burn: never part of a deposit
   const collect = encodeFunctionData({ abi: [{ type: 'function', name: 'collect', stateMutability: 'payable', inputs: [{ name: 'p', type: 'tuple', components: [{ name: 'tokenId', type: 'uint256' }, { name: 'recipient', type: 'address' }, { name: 'amount0Max', type: 'uint128' }, { name: 'amount1Max', type: 'uint128' }] }], outputs: [] }], functionName: 'collect', args: [{ tokenId: 5n, recipient: EVE, amount0Max: 1n, amount1Max: 1n }] });

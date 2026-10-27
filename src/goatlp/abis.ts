@@ -42,6 +42,7 @@ export const posmAbi = [
   { type: 'function', name: 'getPoolAndPositionInfo', stateMutability: 'view', inputs: [{ name: 'tokenId', type: 'uint256' }],
     outputs: [{ name: 'poolKey', type: 'tuple', components: poolKeyComponents }, { name: 'info', type: 'uint256' }] },
   { type: 'function', name: 'nextTokenId', stateMutability: 'view', inputs: [], outputs: [{ name: '', type: 'uint256' }] },
+  { type: 'function', name: 'poolManager', stateMutability: 'view', inputs: [], outputs: [{ name: '', type: 'address' }] },
   { type: 'function', name: 'modifyLiquidities', stateMutability: 'payable', inputs: [{ name: 'unlockData', type: 'bytes' }, { name: 'deadline', type: 'uint256' }], outputs: [] },
 ] as const;
 

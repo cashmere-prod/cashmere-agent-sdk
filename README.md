@@ -365,11 +365,17 @@ server instructions tell the agent to show the plan to the user and to wait for 
 call the same tool with the same inputs plus `execute: true` and the `planId`. A plan is single use and lasts 10
 minutes. At execute the tool builds the plan again from fresh chain reads and sends nothing if it has changed.
 
+A deposit whose pool price is more than 1% from Chainlink lists `acknowledge` lines, as the app's checkboxes do.
+Execute refuses that plan. The agent shows the lines with the plan and, after the user's yes, plans again with
+`acknowledge: true` and executes that plan: `acknowledge` is one of the inputs a plan is bound to.
+
 ### What the tools check
 
 - The RPC is on Robinhood Chain (4663), checked again before anything is signed.
 - Every contract the tools send to, or give a permission to, matches the code hash pinned in this package. None of the
   Goat LP contracts is upgradeable, and their source is published on the explorer ([robin.etherscan.io](https://robin.etherscan.io)).
+- The Uniswap v4 position manager's pool manager and the v3 position manager's factory are the pinned addresses, read
+  once per server. Otherwise every write refuses.
 - Each transaction is decoded and simulated (`eth_call`) right before it is signed. A revert refuses it.
 - A signed message (v4 auto-compound) is decoded and checked before signing: only a `Permit` for `GoatAutoCompoundV4`,
   for a position the wallet owns, within the app's run and deadline limits.
@@ -377,10 +383,11 @@ minutes. At execute the tool builds the plan again from fresh chain reads and se
   never an output to anyone but the wallet, and never an owner, guardian or keeper function. Another app's approval is
   left alone.
 - Automations only where the app offers them: the pair registry and pair table, the reviewed hooks with their pinned
-  code hashes, the keeper's size limit per pair, and the switches the API serves. A refusal gives the app's reason.
+  code hashes, and the keeper's size limit per pair. A refusal gives the app's reason. Nothing is turned on while the
+  automation policy at `api.cashmere.exchange` cannot be read; a stop still works.
 - Deposits: pools of the Uniswap v3 factory, or v4 pools without a hook; no token that copies an official stock ticker
   or takes a fee when it moves; the pool price within 5% of Chainlink where both tokens have a feed; balances that
-  cover it. No swaps, zaps or aggregator routes.
+  cover it; the exact amounts of the plan in the signed call. No swaps, zaps or aggregator routes.
 - Errors never contain a private key or the RPC URL.
 
 Fees: auto-compound takes 10% of the fees it adds back, and Cashmere pays the gas. Auto-range takes 0.15% of the amount
@@ -398,7 +405,8 @@ once on a 429.
 | `CASHMERE_GOATLP_MAX_DEPOSIT_USD=100` | Largest USD value of one `goatlp_add_liquidity` call |
 | `CASHMERE_GOATLP_MAX_TOTAL_USD=500` | Largest USD value `goatlp_add_liquidity` deposits while the server runs |
 
-Both limits value a deposit with the API's token prices and refuse it when a price is missing. The write tools sign with
+Both limits value a deposit with the API's token prices and refuse it when a price is missing. The total counts a
+deposit once it may have left the wallet, and gives it back when the transaction surely did not. The write tools sign with
 `CASHMERE_EVM_PRIVATE_KEY`, on its own wallet: give the agent a dedicated one that holds only what it may deposit,
 plus a little ETH for gas.
 

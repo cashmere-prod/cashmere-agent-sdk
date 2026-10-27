@@ -1,7 +1,7 @@
 // The Robinhood Chain side of the Goat LP tools: a small read interface (what the tools need from an RPC), its viem
 // implementation, the signer interface, and the pin check (the live code hash of every pinned contract).
 import {
-  createPublicClient, createWalletClient, defineChain, http, keccak256, type Abi, type Address, type Chain, type Hex, type PublicClient,
+  createPublicClient, createWalletClient, defineChain, http, keccak256, type Abi, type Address, type Chain, type Hex, type PublicClient, type Transport,
 } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import {
@@ -39,12 +39,22 @@ export interface TypedDataToSign {
   message: { spender: Address; tokenId: bigint; nonce: bigint; deadline: bigint };
 }
 
-/** The wallet the write tools sign with */
+/** The wallet the write tools sign with. sendTransaction throws NotBroadcastError when the transaction never left the
+ *  wallet (it could not be prepared or signed); any other error leaves the outcome unknown. */
 export interface GoatSigner {
   address: Address;
   sendTransaction(tx: { to: Address; data: Hex; value: bigint }): Promise<Hex>;
   signTypedData(td: TypedDataToSign): Promise<Hex>;
 }
+
+/** A send that failed before the transaction was handed to the RPC: nothing can have reached the chain */
+export class NotBroadcastError extends Error {
+  constructor(readonly cause: unknown) {
+    super((cause as { shortMessage?: string })?.shortMessage ?? (cause instanceof Error ? cause.message : String(cause)));
+    this.name = 'NotBroadcastError';
+  }
+}
+export const isNotBroadcast = (e: unknown): boolean => e instanceof NotBroadcastError;
 
 export function robinhoodChain(rpcUrl: string = DEFAULT_ROBINHOOD_RPC_URL): Chain {
   return defineChain({
@@ -83,15 +93,25 @@ export function viemChain(rpcUrl: string = DEFAULT_ROBINHOOD_RPC_URL): GoatChain
   };
 }
 
-/** The viem signer for a private key on Robinhood Chain */
-export function viemSigner(privateKey: string, rpcUrl: string = DEFAULT_ROBINHOOD_RPC_URL): GoatSigner {
+/** The viem signer for a private key on Robinhood Chain (`transport` replaces the RPC in tests) */
+export function viemSigner(privateKey: string, rpcUrl: string = DEFAULT_ROBINHOOD_RPC_URL, transport?: Transport): GoatSigner {
   const key = (privateKey.startsWith('0x') ? privateKey : `0x${privateKey}`) as Hex;
   const account = privateKeyToAccount(key);
   const chain = robinhoodChain(rpcUrl);
-  const wallet = createWalletClient({ account, chain, transport: http(rpcUrl, { timeout: 30_000, retryCount: 0 }) });
+  const wallet = createWalletClient({ account, chain, transport: transport ?? http(rpcUrl, { timeout: 30_000, retryCount: 0 }) });
   return {
     address: account.address,
-    sendTransaction: (tx) => wallet.sendTransaction({ account, chain, to: tx.to, data: tx.data, value: tx.value }),
+    // prepared and signed in the process first, then handed to the RPC: a failure before the hand-over sent nothing
+    sendTransaction: async (tx) => {
+      let raw: Hex;
+      try {
+        const request = await wallet.prepareTransactionRequest({ account, chain, to: tx.to, data: tx.data, value: tx.value });
+        raw = await wallet.signTransaction({ ...request, account, chain } as never);
+      } catch (e) {
+        throw new NotBroadcastError(e);
+      }
+      return wallet.sendRawTransaction({ serializedTransaction: raw });
+    },
     signTypedData: (td) => account.signTypedData(td as never),
   };
 }

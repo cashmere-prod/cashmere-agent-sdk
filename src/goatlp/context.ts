@@ -5,7 +5,7 @@ import type { Address } from 'viem';
 import { GoatApi, type FetchLike } from './api';
 import { viemChain, viemSigner, type GoatChain, type GoatSigner } from './chain';
 import { DEFAULT_ROBINHOOD_RPC_URL } from './constants';
-import { loadEnv, type GoatEnv } from './facts';
+import { checkWiring, loadEnv, type GoatEnv } from './facts';
 import { SessionLog } from './permits';
 
 /** Settings of the Goat LP tools (environment-only in the MCP server) */
@@ -43,6 +43,8 @@ export interface GoatLpContext {
   env(fresh?: boolean): Promise<GoatEnv>;
   /** sessions of signed messages this server made (no signature bytes) */
   sessions: SessionLog;
+  /** why no write may run (the position managers name another pool manager or factory), or null; a pass is kept */
+  wiring(): Promise<string | null>;
 }
 
 const ENV_TTL_MS = 60_000;
@@ -57,6 +59,7 @@ export function createGoatLpContext(o: { privateKey?: string | null; settings?: 
   const chain = deps.chain ?? viemChain(rpcUrl);
   const signer = deps.signer !== undefined ? deps.signer : o.privateKey ? viemSigner(o.privateKey, rpcUrl) : null;
   let cached: { at: number; env: Promise<GoatEnv> } | null = null;
+  let wired = false;
   return {
     api, chain, signer, account: signer?.address ?? null, settings, now, sleep,
     nowSec: () => Math.floor(now() / 1000),
@@ -68,5 +71,11 @@ export function createGoatLpContext(o: { privateKey?: string | null; settings?: 
       return p;
     },
     sessions: new SessionLog(),
+    async wiring() {
+      if (wired) return null;
+      const why = await checkWiring(chain);
+      if (!why) wired = true;
+      return why;
+    },
   };
 }

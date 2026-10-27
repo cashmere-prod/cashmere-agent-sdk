@@ -49,6 +49,8 @@ export interface AddLiquidityInput {
   slippageBps?: number;
   /** v3: pay the WETH side with ETH */
   payWithEth?: boolean;
+  /** the user agreed to the plan's acknowledge lines (part of the inputs a plan is bound to) */
+  acknowledge?: boolean;
 }
 
 /** USD the add-liquidity deposits sent, or may have sent, while the server runs */
@@ -323,6 +325,10 @@ export async function planAddLiquidity(ctx: GoatLpContext, input: AddLiquidityIn
   const pc = priceCheck(cur.sqrtPriceX96, ref);
   if (pc.kind === 'refuse') refuse(pc.text!);
   const acks = pc.kind === 'ack' ? [pc.text!] : [];
+  // as the app's ticked boxes: a plan with acknowledge lines is executed only when it was made with acknowledge: true
+  if (acks.length && planned && input.acknowledge !== true) {
+    throw new Error(`Not sent: this deposit has lines the user must acknowledge (${acks.map((a) => `I understand that ${a}.`).join(' ')}). Show them to the user; after a yes, call goatlp_add_liquidity again with the same inputs plus acknowledge: true, and execute that new plan.`);
+  }
 
   // the wallet covers it
   const paysEth = (i: 0 | 1) => tokens[i].native || ethSide === i;
@@ -400,7 +406,7 @@ export async function planAddLiquidity(ctx: GoatLpContext, input: AddLiquidityIn
   }
   const lp: Omit<LpPlanned, 'chainId' | 'nowSec'> = {
     venue, kind: isIncrease ? 'increase' : 'mint', account: wallet, currencies: pr.currencies, fee: pr.fee, key: pr.key,
-    range, tokenId: pr.tokenId, approvals, permit2, ethSide, value,
+    range, tokenId: pr.tokenId, approvals, permit2, ethSide, value, need,
   };
 
   const steps: TxStep[] = [];
@@ -443,7 +449,9 @@ export async function planAddLiquidity(ctx: GoatLpContext, input: AddLiquidityIn
       deadline: new Date(Number(deadline) * 1000).toISOString(),
     },
     ownerCheck: isIncrease ? { venue, id: pr.tokenId! } : undefined,
+    // counted once it may have left the wallet, as cashmere_bridge counts; given back when it surely did not
     onSend: () => { if (valueUsd !== null) ledger.totalUsd += valueUsd; },
+    onNotSent: () => { if (valueUsd !== null) ledger.totalUsd -= valueUsd; },
     onRevert: () => { if (valueUsd !== null) ledger.totalUsd -= valueUsd; },
     after: (r) => { newId = isIncrease ? null : mintedId(r, nft, wallet); },
     verify: async () => {
@@ -480,7 +488,10 @@ export async function planAddLiquidity(ctx: GoatLpContext, input: AddLiquidityIn
       : `the minimums allow a ${pct(limitBps)} price move; past that the deposit reverts (only gas is spent)`,
     valueUsd: valueUsd === null ? null : Math.round(valueUsd * 100) / 100,
     priceCheck: pc.detail,
-    ...(acks.length ? { acknowledge: acks.map((a) => `I understand that ${a}.`) } : {}),
+    ...(acks.length ? {
+      acknowledge: acks.map((a) => `I understand that ${a}.`),
+      acknowledged: input.acknowledge === true,
+    } : {}),
     ...(maxDepositUsd !== undefined || maxTotalUsd !== undefined ? {
       limits: {
         ...(maxDepositUsd !== undefined ? { perDepositUsd: maxDepositUsd } : {}),
@@ -496,6 +507,9 @@ export async function planAddLiquidity(ctx: GoatLpContext, input: AddLiquidityIn
     tool: 'goatlp_add_liquidity', view, steps,
     basis: { sqrtPriceX96: sqrtP.toString(), tick },
     fingerprintExtra: acks.length ? `ack:${acks.length}` : '',
+    ...(acks.length && input.acknowledge !== true ? {
+      next: 'This plan cannot be executed as it is: show the user the acknowledge lines with the plan. After a yes to both, call goatlp_add_liquidity again with the same inputs plus acknowledge: true, and execute that new plan.',
+    } : {}),
     readBack: async () => (isIncrease
       ? { position: { venue, id: pr.tokenId!.toString(), liquidity: (await liquidityNow()).toString() } }
       : { newPosition: newId === null ? null : { venue, id: (newId as bigint).toString() } }),
@@ -520,7 +534,7 @@ interface LpStepIn {
   view: Record<string, unknown>;
   ownerCheck?: { venue: Venue; id: bigint };
   verify: () => Promise<string | null>;
-  onSend?: () => void; onRevert?: () => void; after?: (r: TxReceipt) => void;
+  onSend?: () => void; onNotSent?: () => void; onRevert?: () => void; after?: (r: TxReceipt) => void;
 }
 
 /** A deposit transaction with its checks right before signing: chain id, pins, the owner, the decode check */
@@ -528,7 +542,7 @@ function lpStep(ctx: GoatLpContext, lp: Omit<LpPlanned, 'chainId' | 'nowSec'>, s
   return {
     kind: 'tx', label: s.label, to: s.to, data: s.data, value: s.value,
     view: { type: 'transaction', ...s.view, to: s.to, value: `${formatUnits(s.value, 18)} ETH` },
-    verify: s.verify, onSend: s.onSend, onRevert: s.onRevert, after: s.after,
+    verify: s.verify, onSend: s.onSend, onNotSent: s.onNotSent, onRevert: s.onRevert, after: s.after,
     precheck: async () => {
       const chainId = await ctx.chain.chainId();
       const pins = await checkPins(ctx.chain, s.pins);

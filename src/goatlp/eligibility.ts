@@ -1,6 +1,6 @@
 // Which automations a pool and a position can have, and why not. One function family for the read tools and the write
 // tools. Rule order is the priority of the reason given:
-//  1. the contract's code-hash check and the switch the served policy may carry (not live = nothing can be sent).
+//  1. the contract's code-hash check (not live = nothing can be sent).
 //  2. pool-wide blocks for every kind: the registry's red list, a hook that can change what a withdrawal returns, a dynamic
 //     fee without a hook, and the hook rule of ./hooks.ts (an unread code hash = "couldn't check").
 //  3. a price reference for every kind: auto-compound needs Chainlink for both tokens or a deep anchor pool; v4 auto-range /
@@ -15,7 +15,6 @@ import { amountsForLiquidityUp } from './lp/liquidity';
 import { BOUNDS, CAP_UNLIMITED, RANGE_MIN_MOVABLE_USD, hasPriceSource } from './constants';
 import { ELIG, oneAtATimeText, pctOfBps, pctOfPips, pctOfTicks } from './copy';
 import { autoCheckOffered, compoundHookReview, hookClassOf, hookPermissionBits, hookReview, isThinCompoundPool, transferTaxOf, type ThinVenue } from './hooks';
-import type { Switches } from './policy';
 import { KINDS } from './types';
 import type {
   ContractFacts, ContractGates, Kind, KindLimits, KindVerdict, Line, PoolFacts, PoolVerdict, PositionFacts, Venue,
@@ -91,17 +90,15 @@ export function usableShare(p: Pick<PositionFacts, 'liquidity' | 'tickLower' | '
 }
 const usdShort = (v: number | null): string | null => (v === null ? null : `$${v >= 1000 ? Math.round(v).toLocaleString('en-US') : v.toFixed(0)}`);
 
-/** Options of a pool verdict: the served switches (an automation switched off there is not live) and the thin-pool list */
-export interface VerdictOpts { switches?: Switches | null; thinVenues?: readonly ThinVenue[] }
+/** Options of a pool verdict: the thin-pool list (the default is this package's) */
+export interface VerdictOpts { thinVenues?: readonly ThinVenue[] }
 
 function kindPool(kind: Kind, f: PoolFacts, gates: ContractGates, o: VerdictOpts = {}): KindVerdict {
   const lines: Line[] = [];
   const limits: KindLimits = {};
   const gate = gates[contractFor(kind, f.venue)];
-  const switchedOff = o.switches?.[f.venue]?.[kind] === false;
-  const live = gate.ok && !switchedOff;
-  if (!gate.ok) lines.push(line('NOT_LIVE', 'block', ELIG.NOT_LIVE, gate.reason));
-  else if (switchedOff) lines.push(line('NOT_LIVE', 'block', ELIG.SWITCHED_OFF, ELIG.SWITCHED_OFF));
+  const live = gate.ok;
+  if (!live) lines.push(line('NOT_LIVE', 'block', ELIG.NOT_LIVE, gate.reason));
   const isV4 = f.venue === 'v4';
   const hooks = isV4 ? f.hooks : undefined;
   const hooksRead = !isV4 || hooks !== undefined;

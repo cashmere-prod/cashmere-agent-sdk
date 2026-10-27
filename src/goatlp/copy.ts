@@ -11,12 +11,11 @@ export const PAUSED_ALL_LINE = 'Paused for everyone right now. Your position is 
 /** Why an automation is not offered (or offered with a limit) for a pool or position */
 export const ELIG = {
   NOT_LIVE: 'This automation cannot be used right now: its contract does not match the build pinned in this package.',
-  SWITCHED_OFF: 'This automation is switched off in the Goat LP app right now.',
-  POLICY_UNREAD: "couldn't read the automation switches from api.cashmere.exchange (/v2/automation/policy); try again in a moment.",
+  POLICY_UNREAD: "couldn't read the automation policy from api.cashmere.exchange (/v2/automation/policy); try again in a moment.",
   THIN_POOL: 'Auto-compound is not offered for this pair here: its pools on this venue are too small.',
   SIZE_LIMITED: "Larger automatic moves wait until this pair's price check is deeper. Smaller ones still run. The exit without a swap is not affected.",
-  SIZE_WAITING_RANGE: "Automatic moves on this pair wait until its price check is deeper, so auto-range would not move this position now.",
-  SIZE_WAITING_EXIT: "Swap exits on this pair wait until its price check is deeper. The exit without a swap (withdraw only) is not affected.",
+  SIZE_WAITING_RANGE: "Auto-range isn't offered on this pair right now. Exits without a swap work.",
+  SIZE_WAITING_EXIT: 'Swap exits on this pair are paused right now. Withdraw only would act right away.',
   NOT_OWNER: 'The configured wallet does not own this position.',
   EMPTY: 'This position is empty.',
   SUBSCRIBER: 'This position is linked to another app (a subscriber). Unlink it first.',

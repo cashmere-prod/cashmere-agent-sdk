@@ -5,7 +5,11 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
-import { decodeFunctionData, encodeErrorResult, recoverTypedDataAddress, toFunctionSelector, type Abi, type Address, type Hex } from 'viem';
+import {
+  custom, decodeFunctionData, encodeErrorResult, parseTransaction, recoverTransactionAddress, recoverTypedDataAddress, toFunctionSelector,
+  type Abi, type Address, type Hex,
+} from 'viem';
+import { isNotBroadcast, viemSigner } from './chain';
 import { createCashmereMcpServer, type CashmereMcpServerOptions } from '../mcp/server';
 import { GoatApi } from './api';
 import { autoExitAbi, gac3Abi, gac4Abi, npmAbi, posmAbi, stewardAbi } from './abis';
@@ -14,7 +18,7 @@ import {
 } from './constants';
 import { nonceOf, permitWord } from './permits';
 import {
-  FOREIGN_APP, NOW_SEC, OTHER, TEST_ACCOUNT, TEST_KEY, V3_POS, V4_POS, apiWorld, fixture, writeWorld, type FakeAnswer,
+  FOREIGN_APP, NOW_SEC, OTHER, TEST_ACCOUNT, TEST_KEY, V3_POS, V4_POS, apiWorld, writeWorld, type FakeAnswer,
 } from './__fixtures__/kit';
 
 const ZERO = '0x0000000000000000000000000000000000000000';
@@ -448,8 +452,8 @@ test("the keeper's size limit: a limited pair shows its line in auto-range and s
 
   const w = setup({ api: { '/automation/status': statusWith([ethUsdgRow('waiting')]) } });
   client = await connect(w.options);
-  assert.match(String((await call(client, 'goatlp_set_auto_range', { venue: 'v4', id })).error), /Auto-range is not offered for this position: Automatic moves on this pair wait until its price check is deeper/);
-  assert.match(String((await call(client, 'goatlp_set_auto_exit', { venue: 'v4', id, lower: { swap: true } })).error), /Swap exits on this pair wait until its price check is deeper.*Set swap: false on that side/);
+  assert.equal((await call(client, 'goatlp_set_auto_range', { venue: 'v4', id })).error, "Not planned: Auto-range is not offered for this position: Auto-range isn't offered on this pair right now. Exits without a swap work.");
+  assert.equal((await call(client, 'goatlp_set_auto_exit', { venue: 'v4', id, lower: { swap: true } })).error, 'Not planned: Swap exits on this pair are paused right now. Withdraw only would act right away.');
   const ok = await call(client, 'goatlp_set_auto_exit', { venue: 'v4', id, lower: { swap: false } });
   assert.equal(ok.error, undefined, String(ok.error));
   assert.equal(w.signer.sent.length, 0);
@@ -457,26 +461,17 @@ test("the keeper's size limit: a limited pair shows its line in auto-range and s
   const pos = await call(client, 'goatlp_position', { venue: 'v4', id });
   const can = (pos.chain as Record<string, Record<string, Record<string, unknown>>>).canTurnOn;
   assert.equal(can.autoRange.offered, false);
-  assert.match(String(can.autoRange.why), /Automatic moves on this pair wait/);
+  assert.equal(can.autoRange.why, "Auto-range isn't offered on this pair right now. Exits without a swap work.");
   await client.close();
 });
 
-test('a switch served in /v2/automation/policy turns an automation off for these tools too; an unreadable policy refuses turning on, never a stop', async () => {
-  const policy = { ...(fixture('automation-policy.json') as Record<string, unknown>), live: { v4: { range: false } } };
-  const s = setup({ api: { '/v2/automation/policy': { body: policy } } });
-  let client = await connect(s.options);
-  assert.match(String((await call(client, 'goatlp_set_auto_range', { venue: 'v4', id: String(V4_POS) })).error), /Auto-range on Uniswap v4: This automation is switched off in the Goat LP app right now\./);
-  const exit = await call(client, 'goatlp_set_auto_exit', { venue: 'v4', id: String(V4_POS), lower: {} });
-  assert.equal(exit.error, undefined, String(exit.error));
-  const pos = await call(client, 'goatlp_position', { venue: 'v4', id: String(V4_POS) });
-  assert.equal((pos.chain as Record<string, Record<string, Record<string, unknown>>>).canTurnOn.autoRange.offered, false);
-  await client.close();
-
+test('while /v2/automation/policy cannot be read, nothing is turned on; a stop still works', async () => {
+  let client: Client;
   const u = setup({ api: { '/v2/automation/policy': { status: 503, body: { error: 'down' } } } });
   u.st.steward.set(V4_POS, { mode: 1, triggerTicks: 102, slippageBps: 25, minInterval: 21600, budget: 20, lastRunAt: 0, flags: 0, lowerTrigger: 0, upperTrigger: 0, pairEpoch: 1, maxSwapFeePips: 10000 });
   u.st.stewardOwner.set(V4_POS, TEST_ACCOUNT);
   client = await connect(u.options);
-  assert.match(String((await call(client, 'goatlp_set_auto_compound', { venue: 'v3', id: String(V3_POS) })).error), /couldn't read the automation switches/);
+  assert.match(String((await call(client, 'goatlp_set_auto_compound', { venue: 'v3', id: String(V3_POS) })).error), /couldn't read the automation policy/);
   const stop = await call(client, 'goatlp_stop_automation', { venue: 'v4', id: String(V4_POS), kind: 'range' });
   assert.equal(stop.error, undefined, String(stop.error));
   await client.close();
@@ -568,4 +563,76 @@ test('stop of v4 auto-compound asks the keeper store to drop the messages only o
   assert.equal((done.steps as Record<string, unknown>[])[2].storeCleared, true);
   await client.close();
   await c2.close();
+});
+
+test('the signer prepares and signs in the process, then hands the raw transaction to the RPC; a failure before the hand-over is "not sent"', async () => {
+  const calls: string[] = [];
+  let raw: Hex | null = null;
+  let failEstimate = false;
+  let failBroadcast = false;
+  const transport = custom({
+    async request({ method, params }: { method: string; params?: unknown }) {
+      calls.push(method);
+      switch (method) {
+        case 'eth_chainId': return '0x1237';
+        case 'eth_getTransactionCount': return '0x7';
+        case 'eth_estimateGas': if (failEstimate) throw new Error('execution reverted'); return '0x5208';
+        case 'eth_maxPriorityFeePerGas': return '0x1';
+        case 'eth_gasPrice': return '0x2';
+        case 'eth_getBlockByNumber': return { number: '0x10', hash: `0x${'11'.repeat(32)}`, baseFeePerGas: '0x1', timestamp: '0x1', transactions: [], gasLimit: '0x1c9c380', gasUsed: '0x0' };
+        case 'eth_sendRawTransaction':
+          if (failBroadcast) throw new Error('the RPC timed out');
+          raw = (params as Hex[])[0];
+          return `0x${'22'.repeat(32)}`;
+        default: throw new Error(`unexpected ${method}`);
+      }
+    },
+  });
+  const signer = viemSigner(TEST_KEY, 'https://rpc.invalid', transport);
+  const hash = await signer.sendTransaction({ to: POSM, data: '0x1234', value: 5n });
+  assert.equal(hash, `0x${'22'.repeat(32)}`);
+  const tx = parseTransaction(raw!);
+  assert.deepEqual([tx.chainId, tx.nonce, tx.to?.toLowerCase(), tx.data, tx.value], [4663, 7, POSM.toLowerCase(), '0x1234', 5n]);
+  assert.equal(await recoverTransactionAddress({ serializedTransaction: raw! as never }), TEST_ACCOUNT);
+  // a failure while preparing: nothing reached the RPC
+  failEstimate = true;
+  const before = calls.filter((c) => c === 'eth_sendRawTransaction').length;
+  await assert.rejects(signer.sendTransaction({ to: POSM, data: '0x1234', value: 0n }), (e: unknown) => isNotBroadcast(e));
+  assert.equal(calls.filter((c) => c === 'eth_sendRawTransaction').length, before);
+  // a failure while handing it over: the outcome is unknown
+  failEstimate = false;
+  failBroadcast = true;
+  await assert.rejects(signer.sendTransaction({ to: POSM, data: '0x1234', value: 0n }), (e: unknown) => !isNotBroadcast(e));
+});
+
+test('every write refuses while the position managers use another pool manager or factory; a pass is kept, a failed read is not', async () => {
+  const s = setup();
+  s.chain.on(POSM, 'poolManager', OTHER);
+  let client = await connect(s.options);
+  for (const [tool, args] of [
+    ['goatlp_add_liquidity', { venue: 'v3', id: String(V3_POS), amount0: '1' }],
+    ['goatlp_set_auto_range', { venue: 'v4', id: String(V4_POS) }],
+    ['goatlp_stop_automation', { venue: 'v3', id: String(V3_POS), kind: 'compound' }],
+  ] as const) {
+    assert.equal((await call(client, tool, args)).error, 'Not planned: the Uniswap v4 PositionManager uses the pool manager 0x00000000000000000000000000000000000000aa, not 0x8366a39CC670B4001A1121B8F6A443A643e40951 as pinned in this package.', tool);
+    assert.equal((await call(client, tool, { ...args, execute: true, planId: 'a'.repeat(24) })).error?.toString().startsWith('Not sent: the Uniswap v4 PositionManager uses the pool manager'), true, tool);
+  }
+  await client.close();
+  const f = setup();
+  f.chain.on(NPM, 'factory', OTHER);
+  client = await connect(f.options);
+  assert.match(String((await call(client, 'goatlp_set_auto_range', { venue: 'v4', id: String(V4_POS) })).error), /the Uniswap v3 NonfungiblePositionManager uses the factory 0x0{38}aa, not 0x1f7d7550B1b028f7571E69A784071F0205FD2EfA/);
+  await client.close();
+  // a failed read refuses and is read again next time; a pass is not read again
+  const r = setup();
+  let fail = true;
+  r.chain.on(POSM, 'poolManager', () => { if (fail) throw new Error('rpc down'); return '0x8366a39CC670B4001A1121B8F6A443A643e40951'; });
+  client = await connect(r.options);
+  assert.match(String((await call(client, 'goatlp_set_auto_range', { venue: 'v4', id: String(V4_POS) })).error), /couldn't read the pool manager and the factory/);
+  fail = false;
+  assert.equal((await call(client, 'goatlp_set_auto_range', { venue: 'v4', id: String(V4_POS) })).error, undefined);
+  await call(client, 'goatlp_set_auto_exit', { venue: 'v4', id: String(V4_POS), lower: {} });
+  assert.equal(r.chain.reads.filter((x) => x.endsWith(':poolmanager') || x.endsWith(':poolManager')).length, 2, 'the failed read and the pass; nothing after');
+  assert.equal(r.signer.sent.length, 0);
+  await client.close();
 });

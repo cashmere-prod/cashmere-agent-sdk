@@ -68,7 +68,9 @@ export class FakeChain implements GoatChain {
       .on(GOAT_AUTO_COMPOUND_V4, 'compoundor', GOAT_V4_COMPOUNDOR).on(GOAT_AUTO_COMPOUND_V4, 'positionManager', POSM)
       .on(GOAT_AUTO_COMPOUND_V3, 'priceAnchor', GOAT_PRICE_ANCHOR).on(GOAT_AUTO_COMPOUND_V3, 'nonfungiblePositionManager', NPM)
       .on(GOAT_V4_COMPOUNDOR, 'priceAnchor', GOAT_PRICE_ANCHOR)
-      .on(AUTO_RANGE_V3, 'pairTable', GOAT_PAIR_TABLE).on(AUTO_EXIT_V3, 'pairTable', GOAT_PAIR_TABLE);
+      .on(AUTO_RANGE_V3, 'pairTable', GOAT_PAIR_TABLE).on(AUTO_EXIT_V3, 'pairTable', GOAT_PAIR_TABLE)
+      // the position managers' own wiring
+      .on(POSM, 'poolManager', '0x8366a39CC670B4001A1121B8F6A443A643e40951').on(NPM, 'factory', '0x1f7d7550B1b028f7571E69A784071F0205FD2EfA');
     // contract state: nothing paused, live fees 10% / 0.15%, every fee recipient the treasury
     const tenPct = (1n << 64n) / 10n;
     const x64 = (bps: bigint) => (bps * (1n << 64n)) / 10_000n;

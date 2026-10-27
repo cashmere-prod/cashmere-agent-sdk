@@ -31,7 +31,7 @@ import { assertAutomationTx, checkAutomationTypedData, type GuardCtx, type Guard
 import {
   dropStoredSessions, handOverRefusal, handOverSessions, listStoredSessions, postSession, readKeeperStatus, sizeLimitOf, type SignedSession,
 } from './keeper';
-import { readPolicy, type Switches } from './policy';
+import { readPolicy } from './policy';
 import { tickToPrice } from './lp/liquidity';
 import { simulate, type BuiltPlan, type PlanStep, type TxStep, type WorkStep } from './plans';
 import {
@@ -92,8 +92,8 @@ interface Gathered {
   onKinds: Kind[] | 'unknown';
   valueUsd?: number;
   minUsd: number;
-  /** the served switches; null = the policy could not be read */
-  switches: Switches | null;
+  /** the served policy was read (nothing is turned on without it) */
+  policyRead: boolean;
   api: ApiPosition | null;
   spenders: Spenders;
 }
@@ -122,7 +122,7 @@ async function gather(ctx: GoatLpContext, venue: Venue, id: bigint): Promise<Gat
   pf.sizeLimit = sizeLimitOf(keeper, venue, pf.token0, pf.token1);
   const v = api?.underlying_value;
   return {
-    env, f, pf, onKinds: onKindsOf(f.rules, f.owner), minUsd: policy?.minUsd ?? RANGE_MIN_MOVABLE_USD, switches: policy?.switches ?? null, api,
+    env, f, pf, onKinds: onKindsOf(f.rules, f.owner), minUsd: policy?.minUsd ?? RANGE_MIN_MOVABLE_USD, policyRead: policy !== null, api,
     ...(typeof v === 'number' && Number.isFinite(v) ? { valueUsd: v } : {}),
     spenders: env.contracts.spenders ?? {},
   };
@@ -371,8 +371,8 @@ export async function planSetAutomation(ctx: GoatLpContext, input: SetAutomation
   const { kind, venue } = input;
   const g = await gather(ctx, venue, id);
   const signer = ctx.signer!;
-  if (!g.switches) refuse(ELIG.POLICY_UNREAD);
-  const verdict = positionVerdict(poolVerdict(g.pf, g.env.gates, { switches: g.switches }), g.f, { account: signer.address, onKinds: g.onKinds, contracts: g.env.contracts, valueUsd: g.valueUsd, minUsd: g.minUsd });
+  if (!g.policyRead) refuse(ELIG.POLICY_UNREAD);
+  const verdict = positionVerdict(poolVerdict(g.pf, g.env.gates), g.f, { account: signer.address, onKinds: g.onKinds, contracts: g.env.contracts, valueUsd: g.valueUsd, minUsd: g.minUsd });
   const kv = verdict.kinds[kind];
   const name = KIND_NAME[kind];
   if (!kv.live) refuse(`${name} on ${VENUE_NAME[venue]}: ${kv.lines.find((l) => l.code === 'NOT_LIVE')?.why ?? ELIG.NOT_LIVE}`);
@@ -391,7 +391,7 @@ export async function planSetAutomation(ctx: GoatLpContext, input: SetAutomation
   const p = { tickLower: g.f.tickLower, tickUpper: g.f.tickUpper, tickSpacing: g.f.tickSpacing, fee: g.pf.fee };
   const draft = buildDraft(input, kv, p, g.valueUsd, g.minUsd);
   const swapSide = draft.kind === 'exit' && (draft.lower.swap || draft.upper.swap);
-  if (swapSide && kv.limits.sizeWaiting) refuse(`${ELIG.SIZE_WAITING_EXIT} Set swap: false on that side for an exit that withdraws only.`);
+  if (swapSide && kv.limits.sizeWaiting) refuse(ELIG.SIZE_WAITING_EXIT);
   const pool = poolCtxOf(p, kv);
   const swapAllowed = !kv.limits.exitWithdrawOnly;
   const change = mode !== 'turn-on';

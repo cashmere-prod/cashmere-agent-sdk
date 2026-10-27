@@ -32,7 +32,8 @@ another way to act.
 2. **Plan.** Call the write tool without `execute`. Nothing is sent. The answer lists every transaction and signed
    message in order, with contract names and addresses, amounts or settings, fees and the simulation result.
 3. **Confirm.** Show the user the whole plan in plain words and ask for an explicit yes. If the plan has
-   `acknowledge` lines, read them out and get a yes to them too.
+   `acknowledge` lines, read them out and get a yes to them too, then plan again with the same inputs plus
+   `acknowledge: true`: execute refuses a plan with those lines that was made without it.
 4. **Execute.** Call the same tool with the same inputs plus `execute: true` and the plan's `planId`. A plan is
    single use and lasts 10 minutes; after that, plan again and confirm again.
 5. **Report** each step's transaction and explorer link, the new position id after a mint, and the `now` state the
