@@ -36,6 +36,17 @@ test('filled, review off: auto-range turn-on on both venues says why and sends n
   await client.close();
 });
 
+test('filled, review off: goatlp_position does not offer auto-range and gives its one plain reason; auto-exit is offered', async () => {
+  const s = setup();
+  const client = await connect(s.options);
+  const r = await call(client, 'goatlp_position', { venue: 'v4', id: String(V4_POS) });
+  const can = (r.chain as { canTurnOn: Record<string, { offered: boolean; why?: string }> }).canTurnOn;
+  assert.equal(can.autoRange.offered, false);
+  assert.ok(String(can.autoRange.why).includes(RANGE_PORT_CLOSED), String(can.autoRange.why));
+  assert.equal(can.autoExit.offered, true, JSON.stringify(can.autoExit));
+  await client.close();
+});
+
 test('filled, review off: v4 auto-exit is turned on on the r4 Steward with a one-position permission', async () => {
   const s = setup();
   const client = await connect(s.options);

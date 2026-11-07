@@ -12,8 +12,8 @@
 import type { Address } from 'viem';
 import { getSqrtRatioAtTick } from './lp/tickMath';
 import { amountsForLiquidityUp } from './lp/liquidity';
-import { BOUNDS, CAP_UNLIMITED, RANGE_MIN_MOVABLE_USD, hasPriceSource } from './constants';
-import { ELIG, oneAtATimeText, pctOfBps, pctOfPips, pctOfTicks } from './copy';
+import { AUTO_RANGE_OPEN, BOUNDS, CAP_UNLIMITED, RANGE_MIN_MOVABLE_USD, hasPriceSource } from './constants';
+import { ELIG, RANGE_PORT_CLOSED, oneAtATimeText, pctOfBps, pctOfPips, pctOfTicks } from './copy';
 import { autoCheckOffered, compoundHookReview, hookClassOf, hookPermissionBits, hookReview, isThinCompoundPool, transferTaxOf, type ThinVenue } from './hooks';
 import { KINDS } from './types';
 import type {
@@ -96,7 +96,9 @@ export interface VerdictOpts { thinVenues?: readonly ThinVenue[] }
 function kindPool(kind: Kind, f: PoolFacts, gates: ContractGates, o: VerdictOpts = {}): KindVerdict {
   const lines: Line[] = [];
   const limits: KindLimits = {};
-  const gate = gates[contractFor(kind, f.venue)];
+  const gate0 = gates[contractFor(kind, f.venue)];
+  // auto-range is offered whole or not at all: closed here until its port is reviewed (AUTO_RANGE_OPEN), one plain line
+  const gate = kind === 'range' && gate0.ok && !AUTO_RANGE_OPEN ? { ok: false, reason: RANGE_PORT_CLOSED } : gate0;
   const live = gate.ok;
   if (!live) lines.push(line('NOT_LIVE', 'block', ELIG.NOT_LIVE, gate.reason));
   const isV4 = f.venue === 'v4';
