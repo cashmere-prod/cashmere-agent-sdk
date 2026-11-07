@@ -30,7 +30,11 @@ test('unfilled: every r4 value is a placeholder, turn-ons are closed, the earlie
 
 test('unfilled: the r4 gates are closed with one plain line, no placeholder is read, the earlier gates are open', async () => {
   const chain = new FakeChain();
+  const hashed: string[] = [];
+  const codeHash = chain.codeHash.bind(chain);
+  chain.codeHash = async (a) => { hashed.push(a.toLowerCase()); return codeHash(a); };
   const env = await loadEnv(chain);
+  assert.ok(hashed.length > 0 && !hashed.includes(ZERO), 'no code read at a placeholder address');
   for (const g of Object.values(env.gates)) assert.deepEqual(g, { ok: false, reason: R4_CLOSED });
   for (const g of Object.values(env.earlier.gates)) assert.equal(g.ok, true, g.reason);
   assert.equal(env.earlier.spenders.rangeExitV4, GOAT_V4_STEWARD_ENGINE_R3);

@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { gac3Abi, posmAbi, stewardAbi } from './abis';
 import {
-  AUTO_RANGE_OPEN, GOAT_AUTO_COMPOUND_V3, GOAT_AUTO_COMPOUND_V3_R3, GOAT_V4_STEWARD, GOAT_V4_STEWARD_ENGINE, GOAT_V4_STEWARD_R3, NPM, POSM, R4_LABEL, R4_READY,
+  AUTO_RANGE_OPEN, AUTO_RANGE_V3, GOAT_AUTO_COMPOUND_V3, GOAT_AUTO_COMPOUND_V3_R3, GOAT_V4_STEWARD, GOAT_V4_STEWARD_ENGINE, GOAT_V4_STEWARD_R3, NPM, POSM, R4_LABEL, R4_READY,
 } from './constants';
 import { EARLIER_RULE, RANGE_PORT_CLOSED } from './copy';
 import { TEST_ACCOUNT, V3_POS, V4_POS } from './__fixtures__/kit';
@@ -24,6 +24,13 @@ test('filled, review off: auto-range turn-on on both venues says why and sends n
   for (const venue of ['v3', 'v4']) {
     const r = await call(client, 'goatlp_set_auto_range', { venue, id: String(venue === 'v4' ? V4_POS : V3_POS) });
     assert.ok(String(r.error).includes(RANGE_PORT_CLOSED), venue);
+  }
+  // the permission for all positions already on (no allow step): still refused, by the plan and by the decode check
+  s.st.forAll.add(`v4:${TEST_ACCOUNT.toLowerCase()}:${GOAT_V4_STEWARD_ENGINE.toLowerCase()}`);
+  s.st.forAll.add(`v3:${TEST_ACCOUNT.toLowerCase()}:${AUTO_RANGE_V3.toLowerCase()}`);
+  for (const venue of ['v3', 'v4']) {
+    const r = await call(client, 'goatlp_set_auto_range', { venue, id: String(venue === 'v4' ? V4_POS : V3_POS) });
+    assert.ok(String(r.error).includes(RANGE_PORT_CLOSED), `${venue}, permission on`);
   }
   assert.equal(s.signer.sent.length, 0);
   await client.close();
