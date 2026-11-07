@@ -10,7 +10,7 @@ import type {
 } from './apiTypes';
 import { addressUrl } from './chain';
 import { PINS, PLANNED_FEES, RANGE_MIN_MOVABLE_USD, ST_FLAG, ZERO_ADDRESS } from './constants';
-import { pctOfBps, pctOfTicks } from './copy';
+import { EARLIER_RULE, pctOfBps, pctOfTicks } from './copy';
 import type { GoatLpContext } from './context';
 import { DYNAMIC_FEE_FLAG, poolVerdict, positionVerdict, verdictSummary } from './eligibility';
 import {
@@ -22,7 +22,7 @@ import { readPolicy } from './policy';
 import { fullRange, rangeAroundPrice, tickToPrice } from './lp/liquidity';
 import { ownSessions, permitWord, unusedCount, type SessionRecord } from './permits';
 import { posmAbi } from './abis';
-import { isGoatSpender } from './calldata';
+import { contractFor, isGoatSpender } from './calldata';
 import { x64ToBps, V3_EXIT_OFF_HIGH, V3_EXIT_OFF_LOW } from './validate';
 import type { ContractFacts, Kind, KindVerdict, PoolFacts, PoolVerdict, PositionFacts, RuleRead, Venue } from './types';
 
@@ -337,7 +337,7 @@ export function describeRule(r: RuleRead, decimals: readonly [number, number] | 
     return {
       ...base, triggerTicks: c.triggerTicks, trigger: pctOfTicks(c.triggerTicks), movesBelowTick: range.tickLower - c.triggerTicks, movesAboveTick: range.tickUpper + c.triggerTicks,
       movesBelowPrice: price(range.tickLower - c.triggerTicks), movesAbovePrice: price(range.tickUpper + c.triggerTicks),
-      maxPriceProtection: pctOfBps(c.slippageBps), atMostOneMoveEvery: secText(c.minInterval), movesLeft: c.budget, maxSwapFee: `${(c.maxSwapFeePips / 10_000).toFixed(2)}%`, lastRun: whenText(c.lastRunAt),
+      maxPriceProtection: pctOfBps(c.slippageBps), atMostOneMoveEvery: secText(c.minInterval), movesLeft: c.budget === 255 ? 'no limit' : c.budget, maxSwapFee: `${(c.maxSwapFeePips / 10_000).toFixed(2)}%`, lastRun: whenText(c.lastRunAt),
     };
   }
   if (r.kind === 'exit' && r.venue === 'v4') {
@@ -418,7 +418,7 @@ export async function positionTool(ctx: GoatLpContext, input: PositionInput) {
     const range = { tickLower: f.tickLower, tickUpper: f.tickUpper };
     const rules = Object.fromEntries((['compound', 'range', 'exit'] as const).map((k) => {
       const r = f.rules?.[k];
-      if (r === undefined) return [kindKey[k], 'not checked (the contract does not match its pin)'];
+      if (r === undefined) return [kindKey[k], `not checked: ${env.gates[contractFor(k, input.venue)].reason}`];
       if (r === 'unknown') return [kindKey[k], "couldn't read this rule on chain"];
       if (!r) return [kindKey[k], { on: false }];
       const d = describeRule(r, decimals, range);
@@ -426,6 +426,13 @@ export async function positionTool(ctx: GoatLpContext, input: PositionInput) {
       const fromOld = r.on && ownerNow && r.owner && lc(r.owner) !== lc(ownerNow);
       return [kindKey[k], fromOld ? { ...d, on: false, note: 'Set by a previous owner; it does not run for the new owner.' } : d];
     }));
+    // rules saved on the earlier contracts: shown with one plain line; they no longer run
+    const earlier: Record<string, unknown> = {};
+    for (const k of ['compound', 'range', 'exit'] as const) {
+      const r = f.earlierRules?.[k];
+      if (r === undefined || r === null || (r !== 'unknown' && !r.on)) continue;
+      earlier[kindKey[k]] = r === 'unknown' ? "couldn't read this rule on the earlier contracts" : { ...describeRule(r, decimals, range), on: false, note: EARLIER_RULE };
+    }
     const onKinds = onKindsOf(f.rules, owner);
     const [policy, keeper] = await Promise.all([readPolicy(ctx.api), readKeeperStatus(ctx.api, ctx.nowSec())]);
     const minUsd = policy?.minUsd ?? RANGE_MIN_MOVABLE_USD;
@@ -434,6 +441,7 @@ export async function positionTool(ctx: GoatLpContext, input: PositionInput) {
     const verdict = pf ? positionVerdict(poolVerdict(pf, env.gates), f, { account: account ?? undefined, onKinds, contracts: env.contracts, valueUsd: api?.underlying_value ?? undefined, minUsd }) : null;
     const approved = f.approved;
     const spenderKey = approved && approved !== 'unknown' ? isGoatSpender(approved, env.contracts.spenders ?? {}) : null;
+    const earlierKey = approved && approved !== 'unknown' && !spenderKey ? isGoatSpender(approved, env.earlier.spenders) : null;
     const keeperRows = (['compound', 'range', 'exit'] as const).map((k) => [k, keeperStatusOf(keeper, id, input.venue, k)] as const).filter(([, r]) => r);
     let signed: Awaited<ReturnType<typeof signedRunsLeft>> = null;
     const c4 = f.rules?.compound;
@@ -444,8 +452,9 @@ export async function positionTool(ctx: GoatLpContext, input: PositionInput) {
       range: { ...range, ...(decimals ? { priceLower: sig(tickToPrice(f.tickLower, decimals[0], decimals[1])), priceUpper: sig(tickToPrice(f.tickUpper, decimals[0], decimals[1])) } : {}) },
       ...(input.venue === 'v4' && f.subscriber !== undefined ? { subscriber: f.subscriber } : {}),
       permission: approved === 'unknown' ? 'unknown' : approved === null || approved === undefined ? 'none'
-        : { address: approved, holder: spenderKey ? SPENDER_NAME[spenderKey] : 'another app (not Goat LP)' },
+        : { address: approved, holder: spenderKey ? SPENDER_NAME[spenderKey] : earlierKey ? `${SPENDER_NAME[earlierKey]} (earlier contracts, no longer runs)` : 'another app (not Goat LP)' },
       rules,
+      ...(Object.keys(earlier).length ? { earlierRules: earlier } : {}),
       ...(signed ? { autoCompoundSignedMessages: signed } : {}),
       ...(keeperRows.length ? { keeper: Object.fromEntries(keeperRows.map(([k, r]) => [kindKey[k], {
         status: KEEPER_STATUS_TEXT[r!.status], ...(r!.reasonKey ? { reason: r!.reasonKey } : {}),

@@ -24,7 +24,7 @@ test('the pin check: every pinned contract matches; a different hash, no code or
   chain.codeHashes.set(GOAT_V4_STEWARD_ENGINE.toLowerCase(), null);
   const r = await checkPins(chain, ['rangeExitV4', 'engine']);
   assert.equal(r.rangeExitV4.ok, false);
-  assert.match(r.rangeExitV4.reason, /GoatV4Steward at 0xBb64.* does not match the build pinned in this package/);
+  assert.equal(r.rangeExitV4.reason, `GoatV4Steward at ${GOAT_V4_STEWARD} does not match the build pinned in this package.`);
   assert.match(r.engine.reason, /GoatV4StewardEngine has no code/);
   chain.codeHash = async () => { throw new Error('rpc down'); };
   assert.match((await checkPins(chain, ['posm'])).posm.reason, /Could not read the code of Uniswap v4 PositionManager/);

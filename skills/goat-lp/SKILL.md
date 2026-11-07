@@ -2,7 +2,7 @@
 name: goat-lp
 description: Look up and manage Goat LP liquidity on Robinhood Chain (Uniswap v3 and v4, chain 4663) with the Cashmere MCP tools. Use when the user asks about Goat LP pools, APR, TVL or volume, their liquidity positions and fees, wants to add liquidity, or wants to turn auto-compound, auto-range or auto-exit on, change it or stop it. Works through goatlp_pools, goatlp_pool, goatlp_positions, goatlp_position, goatlp_add_liquidity, goatlp_set_auto_compound, goatlp_set_auto_range, goatlp_set_auto_exit and goatlp_stop_automation.
 license: MIT
-compatibility: Needs the Cashmere MCP server (npx -y @cashmerelabs/cashmere-agent-sdk@0.4.0, Node.js 22+) connected to the agent, and network access. The write tools need CASHMERE_EVM_PRIVATE_KEY in the server's configuration.
+compatibility: Needs the Cashmere MCP server (npx -y @cashmerelabs/cashmere-agent-sdk@0.5.0, Node.js 22+) connected to the agent, and network access. The write tools need CASHMERE_EVM_PRIVATE_KEY in the server's configuration.
 ---
 
 # Goat LP
@@ -63,8 +63,12 @@ another way to act.
   that is on.
 - An exit side can withdraw only (the default) or swap everything to one token (`swap: true`). When the keeper's
   status advises withdraw only, offer that.
-- Stopping removes the rule and this automation's own permission. It never touches another app's approval or an
-  approval for all positions; the user can remove those in the Goat LP app.
+- Stopping removes the rule and this automation's own permission, on the new contracts and on the earlier ones. A rule
+  that moves in steps lives on more than one position: the stop reaches all of them in one transaction. It never touches
+  another app's approval, nor an approval for all positions on the new contracts (the user's other positions may use it;
+  the Goat LP app removes it); on the earlier contracts, which no longer run rules, it removes that approval too.
+- Auto-range is not offered by these tools until its review. Auto-exit and auto-compound are. A rule saved on the
+  earlier contracts shows as earlier: stop it, then turn it on again to save it on the new contracts.
 
 Fees: auto-compound takes 10% of the fees it adds back, and Cashmere pays the gas. Auto-range takes 0.15% of the
 amount moved per move; auto-exit takes 0.15% once.

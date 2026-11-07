@@ -5,7 +5,7 @@ import {
 } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import {
-  DEFAULT_ROBINHOOD_RPC_URL, EXPLORER_URL, GOAT_CHAIN_ID, GOAT_CHAIN_NAME, MULTICALL3, PINS, type PinKey,
+  DEFAULT_ROBINHOOD_RPC_URL, EXPLORER_URL, GOAT_CHAIN_ID, GOAT_CHAIN_NAME, MULTICALL3, PINS, type Pin, type PinKey,
 } from './constants';
 
 export interface McCall { address: Address; abi: Abi | readonly unknown[]; functionName: string; args?: readonly unknown[] }
@@ -128,11 +128,13 @@ export function codeHashOf(code: Hex | string | null | undefined): Hex | null {
 
 export interface PinResult { ok: boolean; codehash: Hex | null; reason: string }
 
-/** Reads the code of each pinned contract and compares its hash with the pin. A failed read is not ok. */
-export async function checkPins(chain: GoatChain, keys: readonly PinKey[]): Promise<Record<PinKey, PinResult>> {
+/** Reads the code of each pinned contract and compares its hash with the pin (`table`: PINS, or R3_PINS for the earlier
+ *  contracts). A failed read is not ok. */
+export async function checkPins(chain: GoatChain, keys: readonly PinKey[], table: Readonly<Partial<Record<PinKey, Pin>>> = PINS): Promise<Record<PinKey, PinResult>> {
   const out = {} as Record<PinKey, PinResult>;
   await Promise.all(keys.map(async (k) => {
-    const pin = PINS[k];
+    const pin = table[k];
+    if (!pin) { out[k] = { ok: false, codehash: null, reason: `No pin for ${k}.` }; return; }
     try {
       const h = await chain.codeHash(pin.address);
       if (!h) out[k] = { ok: false, codehash: null, reason: `${pin.name} has no code at ${pin.address}.` };

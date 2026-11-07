@@ -8,7 +8,9 @@ import { privateKeyToAccount } from 'viem/accounts';
 import type { GoatChain, GoatSigner, McCall, McRes, TxLog, TxReceipt, TypedDataToSign } from '../chain';
 import {
   AUTO_EXIT_V3, AUTO_RANGE_V3, GOAT_AUTO_COMPOUND_V3, GOAT_AUTO_COMPOUND_V4, GOAT_PAIR_TABLE, GOAT_PRICE_ANCHOR, GOAT_TREASURY,
-  GOAT_V4_COMPOUNDOR, GOAT_V4_PAIR_REGISTRY, GOAT_V4_STEWARD, GOAT_V4_STEWARD_ENGINE, NPM, PINS, POSM,
+  GOAT_V4_COMPOUNDOR, GOAT_V4_PAIR_REGISTRY, GOAT_V4_STEWARD, GOAT_V4_STEWARD_ENGINE, NPM, PINS, POSM, R3_PINS,
+  AUTO_EXIT_V3_R3, AUTO_RANGE_V3_R3, GOAT_AUTO_COMPOUND_V3_R3, GOAT_AUTO_COMPOUND_V4_R3, GOAT_PAIR_TABLE_R3, GOAT_PRICE_ANCHOR_R3,
+  GOAT_V4_COMPOUNDOR_R3, GOAT_V4_PAIR_REGISTRY_R3, GOAT_V4_STEWARD_R3, GOAT_V4_STEWARD_ENGINE_R3,
 } from '../constants';
 import type { FetchLike } from '../api';
 import {
@@ -54,7 +56,8 @@ export class FakeChain implements GoatChain {
   block = 1000n;
 
   constructor() {
-    for (const p of Object.values(PINS)) this.codeHashes.set(lc(p.address), p.codehash);
+    for (const p of Object.values(PINS)) if (!/^0x0{40}$/i.test(p.address)) this.codeHashes.set(lc(p.address), p.codehash);
+    for (const p of Object.values(R3_PINS)) this.codeHashes.set(lc(p.address), p.codehash);
     this.defaults();
   }
 
@@ -69,6 +72,12 @@ export class FakeChain implements GoatChain {
       .on(GOAT_AUTO_COMPOUND_V3, 'priceAnchor', GOAT_PRICE_ANCHOR).on(GOAT_AUTO_COMPOUND_V3, 'nonfungiblePositionManager', NPM)
       .on(GOAT_V4_COMPOUNDOR, 'priceAnchor', GOAT_PRICE_ANCHOR)
       .on(AUTO_RANGE_V3, 'pairTable', GOAT_PAIR_TABLE).on(AUTO_EXIT_V3, 'pairTable', GOAT_PAIR_TABLE)
+      // the earlier contracts name their own
+      .on(GOAT_V4_STEWARD_R3, 'ENGINE', GOAT_V4_STEWARD_ENGINE_R3).on(GOAT_V4_STEWARD_R3, 'REGISTRY', GOAT_V4_PAIR_REGISTRY_R3).on(GOAT_V4_STEWARD_R3, 'POSM', POSM)
+      .on(GOAT_AUTO_COMPOUND_V4_R3, 'compoundor', GOAT_V4_COMPOUNDOR_R3).on(GOAT_AUTO_COMPOUND_V4_R3, 'positionManager', POSM)
+      .on(GOAT_AUTO_COMPOUND_V3_R3, 'priceAnchor', GOAT_PRICE_ANCHOR_R3).on(GOAT_AUTO_COMPOUND_V3_R3, 'nonfungiblePositionManager', NPM)
+      .on(GOAT_V4_COMPOUNDOR_R3, 'priceAnchor', GOAT_PRICE_ANCHOR_R3)
+      .on(AUTO_RANGE_V3_R3, 'pairTable', GOAT_PAIR_TABLE_R3).on(AUTO_EXIT_V3_R3, 'pairTable', GOAT_PAIR_TABLE_R3)
       // the position managers' own wiring
       .on(POSM, 'poolManager', '0x8366a39CC670B4001A1121B8F6A443A643e40951').on(NPM, 'factory', '0x1f7d7550B1b028f7571E69A784071F0205FD2EfA');
     // contract state: nothing paused, live fees 10% / 0.15%, every fee recipient the treasury
@@ -206,7 +215,22 @@ export interface WorldState {
   nonces: Map<string, bigint>;
   /** approvals for all positions by `${venue}:${owner}:${operator}` */
   forAll: Set<string>;
+  /** rules on the earlier contracts (r3), same shapes */
+  old: RuleMaps;
+  /** r4 piece links by `${venue}:${id}` */
+  pieceDest: Map<string, bigint>;
 }
+export interface RuleMaps {
+  gac3: Map<bigint, unknown[]>; gac3Owner: Map<bigint, Address>;
+  gac4: Map<bigint, unknown[]>; gac4Owner: Map<bigint, Address>;
+  ar: Map<bigint, unknown[]>; arOwner: Map<bigint, Address>;
+  ae: Map<bigint, unknown[]>; aeOwner: Map<bigint, Address>;
+  steward: Map<bigint, Record<string, number>>; stewardOwner: Map<bigint, Address>;
+}
+const ruleMaps = (): RuleMaps => ({
+  gac3: new Map(), gac3Owner: new Map(), gac4: new Map(), gac4Owner: new Map(), ar: new Map(), arOwner: new Map(), ae: new Map(), aeOwner: new Map(),
+  steward: new Map(), stewardOwner: new Map(),
+});
 
 const GAC3_OFF_T = [false, false, 0, 0, 0, 0n, 0n];
 const GAC4_OFF_T = [false, false, false, 0, 0, 0, 0n];
@@ -226,7 +250,7 @@ export function goatWorld(o: { owner?: Address; v4Range?: [number, number] } = {
   const st: WorldState = {
     owner: new Map([[`v4:${V4_POS}`, owner], [`v3:${V3_POS}`, owner]]), approved: new Map(),
     gac3: new Map(), gac3Owner: new Map(), gac4: new Map(), gac4Owner: new Map(), ar: new Map(), arOwner: new Map(), ae: new Map(), aeOwner: new Map(),
-    steward: new Map(), stewardOwner: new Map(), nonces: new Map(), forAll: new Set(),
+    steward: new Map(), stewardOwner: new Map(), nonces: new Map(), forAll: new Set(), old: ruleMaps(), pieceDest: new Map(),
   };
   chain.codeHashes.set(REVIEWED_HOOK.toLowerCase(), REVIEWED_HOOK_HASH);
   const id = (a: readonly unknown[]) => BigInt(a[0] as bigint);
@@ -273,7 +297,19 @@ export function goatWorld(o: { owner?: Address; v4Range?: [number, number] } = {
     .on(AUTO_EXIT_V3, 'positionConfigs', (a: readonly unknown[]) => st.ae.get(id(a)) ?? AE_OFF_T)
     .on(AUTO_EXIT_V3, 'positionConfigOwners', (a: readonly unknown[]) => st.aeOwner.get(id(a)) ?? ZERO)
     .on(GOAT_V4_STEWARD, 'configOf', (a: readonly unknown[]) => [st.steward.get(id(a)) ?? ST_OFF, st.stewardOwner.get(id(a)) ?? ZERO])
-    .on(GOAT_V4_STEWARD, 'previewTrigger', [false, false, '0x00000000']);
+    .on(GOAT_V4_STEWARD, 'previewTrigger', [false, false, '0x00000000'])
+    .on(GOAT_V4_STEWARD, 'pieceDest', (a: readonly unknown[]) => st.pieceDest.get(`v4:${id(a)}`) ?? 0n)
+    .on(AUTO_RANGE_V3, 'pieceDest', (a: readonly unknown[]) => st.pieceDest.get(`v3:${id(a)}`) ?? 0n)
+    // rules on the earlier contracts
+    .on(GOAT_AUTO_COMPOUND_V3_R3, 'configs', (a: readonly unknown[]) => st.old.gac3.get(id(a)) ?? GAC3_OFF_T)
+    .on(GOAT_AUTO_COMPOUND_V3_R3, 'configOwner', (a: readonly unknown[]) => st.old.gac3Owner.get(id(a)) ?? ZERO)
+    .on(GOAT_AUTO_COMPOUND_V4_R3, 'configs', (a: readonly unknown[]) => st.old.gac4.get(id(a)) ?? GAC4_OFF_T)
+    .on(GOAT_AUTO_COMPOUND_V4_R3, 'configOwner', (a: readonly unknown[]) => st.old.gac4Owner.get(id(a)) ?? ZERO)
+    .on(AUTO_RANGE_V3_R3, 'positionConfigs', (a: readonly unknown[]) => st.old.ar.get(id(a)) ?? AR_OFF_T)
+    .on(AUTO_RANGE_V3_R3, 'positionConfigOwners', (a: readonly unknown[]) => st.old.arOwner.get(id(a)) ?? ZERO)
+    .on(AUTO_EXIT_V3_R3, 'positionConfigs', (a: readonly unknown[]) => st.old.ae.get(id(a)) ?? AE_OFF_T)
+    .on(AUTO_EXIT_V3_R3, 'positionConfigOwners', (a: readonly unknown[]) => st.old.aeOwner.get(id(a)) ?? ZERO)
+    .on(GOAT_V4_STEWARD_R3, 'configOf', (a: readonly unknown[]) => [st.old.steward.get(id(a)) ?? ST_OFF, st.old.stewardOwner.get(id(a)) ?? ZERO]);
   return { chain, st, owner };
 }
 
@@ -304,29 +340,50 @@ export function playTx(st: WorldState, from: Address, tx: { to: Address; data: H
     const one = (fn: string, args: readonly unknown[]) => {
       if (fn === 'approve') { const a = args[0] as Address; if (/^0x0{40}$/i.test(a)) st.approved.delete(`v4:${args[1]}`); else st.approved.set(`v4:${args[1]}`, a); }
       if (fn === 'revokeNonce') { const n = args[0] as bigint; const k = `${lc(from)}:${n >> 8n}`; st.nonces.set(k, (st.nonces.get(k) ?? 0n) | (1n << (n & 255n))); }
+      if (fn === 'setApprovalForAll') { const k = `v4:${lc(from)}:${lc(args[0] as string)}`; if (args[1]) st.forAll.add(k); else st.forAll.delete(k); }
     };
     if (c.functionName === 'multicall') for (const inner of c.args[0] as Hex[]) { const x = decodeFunctionData({ abi: posmAbiK as Abi, data: inner }) as { functionName: string; args: readonly unknown[] }; one(x.functionName, x.args); }
     else one(c.functionName, c.args);
-  } else if (to === lc(NPM)) {
+    return;
+  }
+  if (to === lc(NPM)) {
     const c = d(npmAbiK);
     if (c.functionName === 'approve') { const a = c.args[0] as Address; if (/^0x0{40}$/i.test(a)) st.approved.delete(`v3:${c.args[1]}`); else st.approved.set(`v3:${c.args[1]}`, a); }
-  } else if (to === lc(GOAT_AUTO_COMPOUND_V3)) {
-    const c = d(gac3AbiK); const id = c.args[0] as bigint; const g = c.args[1] as Record<string, unknown>;
-    st.gac3.set(id, [g.enabled, g.swapEnabled, g.maxSlippageBps, g.minInterval, 0, 0n, 0n]); st.gac3Owner.set(id, from);
-  } else if (to === lc(GOAT_AUTO_COMPOUND_V4)) {
-    const c = d(gac4AbiK); const id = c.args[0] as bigint; const g = c.args[1] as Record<string, unknown>;
-    st.gac4.set(id, [g.enabled, g.claimOnly, g.allowStandingApproval, g.maxSlippageBps, g.minInterval, 0, 0n]); st.gac4Owner.set(id, from);
-  } else if (to === lc(AUTO_RANGE_V3)) {
-    const c = d(autoRangeAbiK); const id = c.args[0] as bigint; const g = c.args[2] as Record<string, unknown>;
-    st.ar.set(id, [g.lowerTickLimit, g.upperTickLimit, g.lowerTickDelta, g.upperTickDelta, g.token0SlippageX64, g.token1SlippageX64, g.onlyFees, g.autoCompound, g.maxRewardX64]); st.arOwner.set(id, from);
-  } else if (to === lc(AUTO_EXIT_V3)) {
-    const c = d(autoExitAbiK); const id = c.args[0] as bigint; const g = c.args[1] as Record<string, unknown>;
-    st.ae.set(id, [g.isActive, g.token0Swap, g.token1Swap, g.token0TriggerTick, g.token1TriggerTick, g.token0SlippageX64, g.token1SlippageX64, g.onlyFees, g.maxRewardX64]); st.aeOwner.set(id, from);
-  } else if (to === lc(GOAT_V4_STEWARD)) {
-    const c = d(stewardAbiK); const id = c.args[0] as bigint;
-    if (c.functionName === 'clearConfig') st.steward.set(id, { ...ST_OFF });
-    else if (c.functionName === 'setRangeConfig') { const g = c.args[1] as Record<string, number>; st.steward.set(id, { ...ST_OFF, mode: 1, triggerTicks: g.triggerTicks, slippageBps: g.slippageBps, minInterval: g.minInterval, budget: g.budget, maxSwapFeePips: g.maxSwapFeePips, pairEpoch: 1 }); st.stewardOwner.set(id, from); }
-    else if (c.functionName === 'setExitConfig') { const g = c.args[1] as Record<string, number>; st.steward.set(id, { ...ST_OFF, mode: 2, flags: g.flags, lowerTrigger: g.lowerTrigger, upperTrigger: g.upperTrigger, slippageBps: g.slippageBps, maxSwapFeePips: g.maxSwapFeePips, pairEpoch: 1 }); st.stewardOwner.set(id, from); }
+    if (c.functionName === 'setApprovalForAll') { const k = `v3:${lc(from)}:${lc(c.args[0] as string)}`; if (c.args[1]) st.forAll.add(k); else st.forAll.delete(k); }
+    return;
+  }
+  const gens: [RuleMaps, Record<string, string>][] = [
+    [st, { gac3: GOAT_AUTO_COMPOUND_V3, gac4: GOAT_AUTO_COMPOUND_V4, ar: AUTO_RANGE_V3, ae: AUTO_EXIT_V3, steward: GOAT_V4_STEWARD }],
+    [st.old, { gac3: GOAT_AUTO_COMPOUND_V3_R3, gac4: GOAT_AUTO_COMPOUND_V4_R3, ar: AUTO_RANGE_V3_R3, ae: AUTO_EXIT_V3_R3, steward: GOAT_V4_STEWARD_R3 }],
+  ];
+  for (const [m, a] of gens) {
+    if (to === lc(a.gac3)) {
+      const c = d(gac3AbiK); const id = c.args[0] as bigint; const g = c.args[1] as Record<string, unknown>;
+      m.gac3.set(id, [g.enabled, g.swapEnabled, g.maxSlippageBps, g.minInterval, 0, 0n, 0n]); m.gac3Owner.set(id, from);
+    } else if (to === lc(a.gac4)) {
+      const c = d(gac4AbiK); const id = c.args[0] as bigint; const g = c.args[1] as Record<string, unknown>;
+      m.gac4.set(id, [g.enabled, g.claimOnly, g.allowStandingApproval, g.maxSlippageBps, g.minInterval, 0, 0n]); m.gac4Owner.set(id, from);
+    } else if (to === lc(a.ar)) {
+      const c = d(autoRangeAbiK); const g = c.args[2] as Record<string, unknown>;
+      const ids = c.functionName === 'configTokens' ? (c.args[0] as bigint[]) : [c.args[0] as bigint];
+      for (const id of ids) {
+        if (c.functionName === 'configTokens' && !m.arOwner.has(id)) continue;
+        m.ar.set(id, [g.lowerTickLimit, g.upperTickLimit, g.lowerTickDelta, g.upperTickDelta, g.token0SlippageX64, g.token1SlippageX64, g.onlyFees, g.autoCompound, g.maxRewardX64]); m.arOwner.set(id, from);
+        if (m === st) st.pieceDest.delete(`v3:${id}`);
+      }
+    } else if (to === lc(a.ae)) {
+      const c = d(autoExitAbiK); const id = c.args[0] as bigint; const g = c.args[1] as Record<string, unknown>;
+      m.ae.set(id, [g.isActive, g.token0Swap, g.token1Swap, g.token0TriggerTick, g.token1TriggerTick, g.token0SlippageX64, g.token1SlippageX64, g.onlyFees, g.maxRewardX64]); m.aeOwner.set(id, from);
+    } else if (to === lc(a.steward)) {
+      const c = d(stewardAbiK);
+      const ids = c.functionName === 'clearConfigs' || c.functionName === 'setRangeConfigs' ? (c.args[0] as bigint[]) : [c.args[0] as bigint];
+      for (const id of ids) {
+        if (m === st) st.pieceDest.delete(`v4:${id}`);
+        if (c.functionName === 'clearConfig' || c.functionName === 'clearConfigs') m.steward.set(id, { ...ST_OFF });
+        else if (c.functionName === 'setRangeConfig' || c.functionName === 'setRangeConfigs') { const g = c.args[1] as Record<string, number>; m.steward.set(id, { ...ST_OFF, mode: 1, triggerTicks: g.triggerTicks, slippageBps: g.slippageBps, minInterval: g.minInterval, budget: g.budget, maxSwapFeePips: g.maxSwapFeePips, pairEpoch: 1 }); m.stewardOwner.set(id, from); }
+        else if (c.functionName === 'setExitConfig') { const g = c.args[1] as Record<string, number>; m.steward.set(id, { ...ST_OFF, mode: 2, flags: g.flags, lowerTrigger: g.lowerTrigger, upperTrigger: g.upperTrigger, slippageBps: g.slippageBps, maxSwapFeePips: g.maxSwapFeePips, pairEpoch: 1 }); m.stewardOwner.set(id, from); }
+      }
+    }
   }
 }
 

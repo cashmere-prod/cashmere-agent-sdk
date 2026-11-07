@@ -1,7 +1,7 @@
 // Rule validators shared by the builders (before encoding) and the decode check (on the decoded final bytes), so an
 // argument changed after building still fails. The bounds are the contracts' own checks plus the launch policy.
 // Validators never clamp: they return the list of problems ([] = fine).
-import { BOUNDS, HORIZON_MAX_SEC, MAX_RUNS_PER_SESSION, ST_FLAG, STEWARD_BUDGET } from './constants';
+import { BOUNDS, HORIZON_MAX_SEC, MAX_RUNS_PER_SESSION, ST_FLAG, STEWARD_BUDGET_UNLIMITED } from './constants';
 import { INVALID, pctOfBps, pctOfPips, pctOfTicks } from './copy';
 
 export const Q64 = 1n << 64n;
@@ -70,6 +70,9 @@ export interface PoolCtx {
   floorFeePips: number;
 }
 
+/** The r4 Steward takes a move limit of 1 to 20, or 255 for none; 0 and 21-254 are refused */
+export const validBudget = (b: number): boolean => int(b) && ((b >= 1 && b <= BOUNDS.steward.maxBudget) || b === STEWARD_BUDGET_UNLIMITED);
+
 export interface RangeParamsIn { triggerTicks: number; slippageBps: number; minInterval: number; budget: number; standing: boolean; maxSwapFeePips: number }
 export function validateRangeV4(p: RangeParamsIn, ctx: PoolCtx & { widthTicks: number }): string[] {
   const e: string[] = [];
@@ -78,8 +81,8 @@ export function validateRangeV4(p: RangeParamsIn, ctx: PoolCtx & { widthTicks: n
   else if (p.triggerTicks > S.maxTriggerTicks) e.push(INVALID.triggerMax);
   if (!int(p.slippageBps) || p.slippageBps < S.minSlippageBps || p.slippageBps > ctx.maxSlippageBps) e.push(INVALID.rangeSlip(pctOfBps(ctx.maxSlippageBps)));
   if (!int(p.minInterval) || p.minInterval < S.minInterval || p.minInterval > S.maxInterval) e.push(INVALID.rangeInterval);
-  if (!int(p.budget) || p.budget < 1 || p.budget > STEWARD_BUDGET) e.push('Moves allowed must be between 1 and 20.');
-  if (p.standing !== false) e.push('A permission for all positions is never used: the rule covers this position only.');
+  if (!validBudget(p.budget)) e.push('Moves allowed must be between 1 and 20, or 255 for no move limit.');
+  if (p.standing !== true) e.push('Auto-range on the new contracts keeps running after each move: the rule must be saved as standing.');
   const floor = Math.max(1, ctx.floorFeePips);
   if (!int(p.maxSwapFeePips) || p.maxSwapFeePips < floor || p.maxSwapFeePips > S.maxSwapFeePips) e.push(INVALID.swapFee(pctOfPips(floor)));
   const minW = minWidth(ctx.gate, ctx.tickSpacing);

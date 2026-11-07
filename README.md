@@ -224,7 +224,7 @@ The package includes an MCP server, so Claude Desktop, Claude Code, Hermes Agent
 send transfers as tools. It runs over stdio and needs Node.js 22 or later:
 
 ```bash
-npx -y @cashmerelabs/cashmere-agent-sdk@0.4.0
+npx -y @cashmerelabs/cashmere-agent-sdk@0.5.0
 ```
 
 Pin the version as here: the process holds your keys, so it should run exactly the release you chose.
@@ -285,7 +285,7 @@ on macOS, `%APPDATA%\Claude\` on Windows) and restart Claude Desktop:
   "mcpServers": {
     "cashmere": {
       "command": "npx",
-      "args": ["-y", "@cashmerelabs/cashmere-agent-sdk@0.4.0"],
+      "args": ["-y", "@cashmerelabs/cashmere-agent-sdk@0.5.0"],
       "env": {
         "CASHMERE_EVM_PRIVATE_KEY": "0x...",
         "CASHMERE_MCP_MAX_AMOUNT": "500",
@@ -312,7 +312,7 @@ On Claude Code before 2.1.275, run `/plugin marketplace add cashmere-prod/cashme
 `/plugin install cashmere@cashmere`. To add only the server:
 
 ```bash
-claude mcp add --env CASHMERE_MCP_READ_ONLY=1 --env npm_config_ignore_scripts=true --transport stdio cashmere -- npx -y @cashmerelabs/cashmere-agent-sdk@0.4.0
+claude mcp add --env CASHMERE_MCP_READ_ONLY=1 --env npm_config_ignore_scripts=true --transport stdio cashmere -- npx -y @cashmerelabs/cashmere-agent-sdk@0.5.0
 ```
 
 ### Hermes Agent
@@ -324,7 +324,7 @@ a small fixed baseline, not your shell environment, and names the tools `mcp_cas
 mcp_servers:
   cashmere:
     command: "npx"
-    args: ["-y", "@cashmerelabs/cashmere-agent-sdk@0.4.0"]
+    args: ["-y", "@cashmerelabs/cashmere-agent-sdk@0.5.0"]
     env:
       CASHMERE_EVM_PRIVATE_KEY: "0x..."
       CASHMERE_MCP_MAX_AMOUNT: "500"
@@ -342,7 +342,9 @@ Run `npm install && npm run build`, then point the client at the built file inst
 
 The MCP server also has tools for [Goat LP](https://docs.cashmere.exchange/goat-lp/overview), Uniswap v3 and v4
 liquidity on Robinhood Chain (chain 4663): pools, positions, adding liquidity, and the auto-compound, auto-range and
-auto-exit automations. They are in 0.4.0 and later.
+auto-exit automations. They are in 0.4.0 and later. From 0.5.0 they use the Goat LP contracts of November 2026: rules
+are turned on there, and a stop also reaches a rule saved on the earlier contracts, which no longer run rules. The
+Goat LP tools of 0.4.0 save rules on the earlier contracts, where they do not run: use 0.5.0.
 
 | Tool | What it does |
 |------|--------------|
@@ -380,7 +382,9 @@ Execute refuses that plan. The agent shows the lines with the plan and, after th
 - Each transaction is decoded and simulated (`eth_call`) right before it is signed. A revert refuses it.
 - A signed message (v4 auto-compound) is decoded and checked before signing: only a `Permit` for `GoatAutoCompoundV4`,
   for a position the wallet owns, within the app's run and deadline limits.
-- Never a permission for all positions, never an unlimited token or Permit2 allowance, never a transfer of a position,
+- A permission for all positions only as the first step of auto-range, which the new contracts require, to AutoRange
+  (v3) or GoatV4StewardEngine (v4); it acts only on positions where auto-range is on. Auto-range is not offered by
+  these tools until its review; its stop always works. Never an unlimited token or Permit2 allowance, never a transfer of a position,
   never an output to anyone but the wallet, and never an owner, guardian or keeper function. Another app's approval is
   left alone.
 - Automations only where the app offers them: the pair registry and pair table, the reviewed hooks with their pinned

@@ -7,25 +7,32 @@
 //  - stop: as the app's stop plans (rule off, then remove this automation's own permission and cancel unused signed
 //    messages); another app's approval is never touched.
 // One automation per position: a v3 position has one approved address, so a second one is refused.
+// Two generations (./constants.ts): every rule is turned on and changed on the r4 contracts, and nothing is turned on while
+// their values are placeholders; a stop reaches the rule on r4 and on the earlier contracts. Auto-range is turned on and
+// changed only when AUTO_RANGE_OPEN (its permission for all positions comes first); its stop always works.
 import { encodeFunctionData, type Abi, type Address, type Hex } from 'viem';
 import { autoExitAbi, autoRangeAbi, gac3Abi, gac4Abi, npmAbi, posmAbi, stewardAbi } from './abis';
 import { routes } from './api';
 import type { ApiPosition } from './apiTypes';
 import { checkPins, type McCall } from './chain';
+import { heldByAll, rangeFamily, type RuleFamily } from './r4family';
 import {
   BOUNDS, COMPOUND_INTERVAL_DEFAULT, COMPOUND_INTERVAL_PRESETS, COMPOUND_SLIP_DEFAULT_BPS, DAY, EXIT_DEFAULT_OFFSET_PCT, GOAT_CHAIN_ID,
   HORIZON_DEFAULT_DAYS, HORIZON_MAX_DAYS, HOUR, MAX_RUNS_PER_SESSION, MAX_SWAP_FEE_DEFAULT_PIPS, NPM, POSM, RANGE_INTERVAL_DEFAULT,
   RANGE_MIN_MOVABLE_USD, RANGE_SLIP_DEFAULT_BPS, RUNS_TO_SIGN_DEFAULT, SMALL_HORIZON_DAYS, SMALL_RUNS_TO_SIGN, STEWARD_BUDGET, pinOf, type PinKey,
+  AUTO_RANGE_OPEN, PINS, R3_PINS, R4_READY, type Gen,
 } from './constants';
 import {
-  alignWidth, contractFor, isGoatSpender, setExit, setRange, spenderFor, stopPlan, turnOnSteps, v3CompoundEnable, v3ExitEnable,
-  v3RangeEnable, v4CompoundEnable, type Spenders,
+  alignWidth, contractFor, isGoatSpender, setExit, setRange, setRangeMany, spenderFor, stopPlan, turnOnSteps, v3CompoundEnable, v3ExitEnable,
+  v3RangeEnable, v3RangeEnableMany, v4CompoundEnable, type Spenders,
 } from './calldata';
-import { ELIG, INVALID, KIND_NAME, LIMITS_UNREAD, PAUSED_ALL_LINE, STEP, VENUE_NAME, WRONG_OWNER_NOW, pctOfBps, pctOfTicks } from './copy';
+import {
+  EARLIER_RULE, ELIG, INVALID, KIND_NAME, LIMITS_UNREAD, PAUSED_ALL_LINE, R4_CLOSED, RANGE_PORT_CLOSED, STEP, VENUE_NAME, WRONG_OWNER_NOW, pctOfBps, pctOfTicks,
+} from './copy';
 import type { GoatLpContext } from './context';
 import { blockOf, poolVerdict, positionVerdict } from './eligibility';
 import {
-  TARGETS, loadPoolFacts, loadPositionFacts, onKindsOf, poolOfPosition, toAe, toAr, toGac3, toGac4, toSt, type GoatEnv,
+  TARGETS, TARGETS_R3, loadPoolFacts, loadPositionFacts, onKindsOf, poolOfPosition, toAe, toAr, toGac3, toGac4, toSt, type GoatEnv,
 } from './facts';
 import { assertAutomationTx, checkAutomationTypedData, type GuardCtx, type GuardIntent } from './guard';
 import {
@@ -151,7 +158,9 @@ function positionView(g: Gathered, venue: Venue, id: bigint) {
 }
 
 /** A transaction step with the fresh reads and the decode check that run right before it is signed */
-function txStep(ctx: GoatLpContext, g: Gathered, call: AutoCall, x: { kind: Kind; venue: Venue; intent: GuardIntent; pool?: GuardCtx['pool']; revokeAllowed?: readonly bigint[]; activeKinds: GuardCtx['activeKinds'] }, verify: () => Promise<string | null>): TxStep {
+interface StepX { kind: Kind; venue: Venue; intent: GuardIntent; pool?: GuardCtx['pool']; revokeAllowed?: readonly bigint[]; activeKinds: GuardCtx['activeKinds']; gen?: Gen; batchIds?: readonly bigint[] }
+
+function txStep(ctx: GoatLpContext, g: Gathered, call: AutoCall, x: StepX, verify: () => Promise<string | null>): TxStep {
   const pinOfTo = pinOf(call.to);
   const view: Record<string, unknown> = {
     type: 'transaction', contract: pinOfTo?.pin.name ?? call.to, to: call.to, call: callText(call), value: '0 ETH',
@@ -160,13 +169,17 @@ function txStep(ctx: GoatLpContext, g: Gathered, call: AutoCall, x: { kind: Kind
     kind: 'tx', label: call.label, to: call.to, data: call.data, value: call.value, view, verify,
     precheck: async () => {
       const signer = ctx.signer!;
-      // the target, and a spender it is given, must still have their pinned code
-      const keys = new Set<PinKey>();
-      if (pinOfTo) keys.add(pinOfTo.key);
-      if (call.functionName === 'approve' && !isZero(call.args[0] as string)) { const p = pinOf(call.args[0] as string); if (p) keys.add(p.key); else return 'the permission would go to an address that is not pinned'; }
-      const pins = await checkPins(ctx.chain, [...keys]);
+      // the target, and a spender it is given or that loses a permission for all positions, must still have their pinned code
+      const keys: Record<Gen, Set<PinKey>> = { r4: new Set(), r3: new Set() };
+      if (pinOfTo) keys[pinOfTo.gen].add(pinOfTo.key);
+      if ((call.functionName === 'approve' || call.functionName === 'setApprovalForAll') && !isZero(call.args[0] as string)) {
+        const p = pinOf(call.args[0] as string);
+        if (p) keys[p.gen].add(p.key); else return 'the permission would go to an address that is not pinned';
+      }
+      const pins = { ...(await checkPins(ctx.chain, [...keys.r4], PINS)), ...(keys.r3.size ? await checkPins(ctx.chain, [...keys.r3], R3_PINS) : {}) };
       const bad = Object.values(pins).find((p) => !p.ok);
       if (bad) return bad.reason;
+      if (x.batchIds && x.batchIds.length > 1 && !(await heldByAll(ctx.chain, x.venue, x.batchIds, signer.address))) return 'a position of this rule changed hands or could not be read; plan the step again';
       const chainId = await ctx.chain.chainId();
       const nft = x.venue === 'v4' ? { address: POSM, abi: posmAbi } : { address: NPM, abi: npmAbi };
       const [owner, approved] = await Promise.all([
@@ -181,12 +194,14 @@ function txStep(ctx: GoatLpContext, g: Gathered, call: AutoCall, x: { kind: Kind
   };
 }
 
-function guardCtx(ctx: GoatLpContext, g: Gathered, x: { kind: Kind; venue: Venue; intent: GuardIntent; pool?: GuardCtx['pool']; revokeAllowed?: readonly bigint[]; activeKinds: GuardCtx['activeKinds']; chainId: number; account: Address; ownerOnChain: Address | null; currentApproved: Address | null; tokenId: bigint }): GuardCtx {
+function guardCtx(ctx: GoatLpContext, g: Gathered, x: StepX & { chainId: number; account: Address; ownerOnChain: Address | null; currentApproved: Address | null; tokenId: bigint }): GuardCtx {
   const treasuryOk = Object.fromEntries(Object.entries(g.env.contracts.treasuryOk ?? {}).map(([k, v]) => [k, v === true]));
+  const e = g.env.earlier;
   return {
     chainId: x.chainId, account: x.account, tokenId: x.tokenId, ownerOnChain: x.ownerOnChain, kind: x.kind, venue: x.venue, intent: x.intent,
-    gates: g.env.gates, targets: TARGETS, spenders: g.spenders, currentApproved: x.currentApproved, pool: x.pool,
+    gates: g.env.gates, targets: TARGETS, spenders: x.gen === 'r3' ? e.spenders : g.spenders, currentApproved: x.currentApproved, pool: x.pool,
     liveFees: g.env.contracts.feesX64, treasuryOk, activeKinds: x.activeKinds, revokeAllowed: x.revokeAllowed ?? [], nowSec: ctx.nowSec(),
+    gen: x.gen ?? 'r4', earlier: { targets: TARGETS_R3, gates: e.gates, spenders: e.spenders }, ...(x.batchIds ? { batchIds: x.batchIds } : {}),
   };
 }
 
@@ -207,6 +222,17 @@ export async function verifyCall(ctx: GoatLpContext, call: AutoCall): Promise<st
   const sameCfg = (sent: Record<string, unknown>, got: Record<string, unknown>) => Object.keys(sent).filter((k) => k !== 'lastRunAt').every((k) => String(sent[k]) === String(got[k]));
   const nftOf = call.contract === 'npm' ? { address: NPM, abi: npmAbi } : { address: POSM, abi: posmAbi };
   const NOT_SEEN = 'the chain does not show the expected result yet; check the position again in a moment';
+  if (call.functionName === 'setApprovalForAll') {
+    const on = await read<boolean>(nftOf.address, nftOf.abi, 'isApprovedForAll', [ctx.signer!.address, call.args[0]]);
+    return on === call.args[1] ? null : NOT_SEEN;
+  }
+  if (call.functionName === 'clearConfigs' || call.functionName === 'configTokens' || call.functionName === 'setRangeConfigs') {
+    for (const one of call.args[0] as readonly bigint[]) {
+      const why = await verifyCall(ctx, { ...call, tokenId: one, functionName: call.functionName === 'clearConfigs' ? 'clearConfig' : call.functionName === 'configTokens' ? 'configToken' : 'setRangeConfig', args: [one, ...call.args.slice(1)] });
+      if (why) return why;
+    }
+    return null;
+  }
   if (call.functionName === 'approve') {
     const a = await read<Address>(nftOf.address, nftOf.abi, 'getApproved', [id]);
     const want = call.args[0] as Address;
@@ -334,7 +360,7 @@ function draftView(d: RuleDraft, p: { tickLower: number; tickUpper: number }, de
       return {
         trigger: `${pctOfTicks(x.triggerTicks)} past the range (${x.triggerTicks} ticks)`, movesWhenBelow: at(p.tickLower - x.triggerTicks), movesWhenAbove: at(p.tickUpper + x.triggerTicks),
         newRange: 'the same width, centred on the price', maxPriceProtection: pctOfBps(x.slippageBps), atMostOneMoveEvery: every(x.minInterval),
-        maxSwapFee: `${(x.maxSwapFeePips / 10_000).toFixed(2)}%`, movesAllowed: STEWARD_BUDGET,
+        maxSwapFee: `${(x.maxSwapFeePips / 10_000).toFixed(2)}%`, movesAllowed: STEWARD_BUDGET === 255 ? 'No move limit: it keeps running until you turn it off.' : STEWARD_BUDGET,
       };
     }
     case 'range:v3': {
@@ -369,6 +395,8 @@ function feeLine(g: Gathered, kind: Kind, venue: Venue): string {
 export async function planSetAutomation(ctx: GoatLpContext, input: SetAutomationInput, nowSec: number): Promise<BuiltPlan> {
   const id = BigInt(input.id);
   const { kind, venue } = input;
+  if (!R4_READY) refuse(R4_CLOSED);
+  if (kind === 'range' && !AUTO_RANGE_OPEN) refuse(RANGE_PORT_CLOSED);
   const g = await gather(ctx, venue, id);
   const signer = ctx.signer!;
   if (!g.policyRead) refuse(ELIG.POLICY_UNREAD);
@@ -397,15 +425,34 @@ export async function planSetAutomation(ctx: GoatLpContext, input: SetAutomation
   const change = mode !== 'turn-on';
   const fees = c.feesX64 ?? {};
   const to = TARGETS[key];
+  // auto-range: the permission for all positions (given first), and on a change every position of the rule
+  let forAll: boolean | undefined;
+  let family: RuleFamily | null = null;
+  if (kind === 'range') {
+    const spender = spenderFor('range', venue, g.spenders);
+    if (!spender) refuse("couldn't read the auto-range contract's spender on chain.");
+    const nftAt = venue === 'v4' ? { address: POSM, abi: posmAbi } : { address: NPM, abi: npmAbi };
+    forAll = await ctx.chain.read<boolean>({ ...nftAt, functionName: 'isApprovedForAll', args: [signer.address, spender] } as McCall)
+      .catch(() => refuse("couldn't read whether the permission for all positions is on."));
+    const rr = g.f.rules?.range;
+    if (change && rr && rr !== 'unknown') {
+      family = await rangeFamily({ chain: ctx.chain, api: ctx.api, env: g.env, venue, id, owner: signer.address, rule: rr, pool: venue === 'v4' ? g.pf.poolId ?? null : g.pf.pool ?? null });
+    }
+  }
+  const many = family && family.ids.length > 1 ? family.ids : null;
   let built: { ok: true; value: AutoCall } | { ok: false; errors: string[] };
   switch (`${kind}:${venue}`) {
     case 'compound:v3': built = v3CompoundEnable({ tokenId: id, draft: draft as CompoundV3Draft, gac3: to, change }); break;
     case 'compound:v4': built = v4CompoundEnable({ tokenId: id, draft: draft as CompoundV4Draft, gac4: to, change }); break;
-    case 'range:v4': built = setRange({ tokenId: id, draft: draft as RangeV4Draft, steward: to, pool, widthTicks: p.tickUpper - p.tickLower, change }); break;
+    case 'range:v4': built = many
+      ? setRangeMany({ tokenIds: many, draft: draft as RangeV4Draft, steward: to, pool, widthTicks: p.tickUpper - p.tickLower })
+      : setRange({ tokenId: id, draft: draft as RangeV4Draft, steward: to, pool, widthTicks: p.tickUpper - p.tickLower, change }); break;
     case 'exit:v4': built = setExit({ tokenId: id, draft: draft as ExitV4Draft, steward: to, pool, tickLower: p.tickLower, tickUpper: p.tickUpper, swapAllowed, change }); break;
     case 'range:v3':
       if (fees.rangeFeeX64 === undefined) refuse("couldn't read the current auto-range fee.");
-      built = v3RangeEnable({ tokenId: id, draft: draft as RangeV3Draft, autoRange: to, gate: pool.gate, tickSpacing: pool.tickSpacing, rangeFeeX64: fees.rangeFeeX64!, change }); break;
+      built = many
+        ? v3RangeEnableMany({ tokenIds: many, draft: draft as RangeV3Draft, autoRange: to, gate: pool.gate, tickSpacing: pool.tickSpacing, rangeFeeX64: fees.rangeFeeX64! })
+        : v3RangeEnable({ tokenId: id, draft: draft as RangeV3Draft, autoRange: to, gate: pool.gate, tickSpacing: pool.tickSpacing, rangeFeeX64: fees.rangeFeeX64!, change }); break;
     default:
       if (fees.exitFeeX64 === undefined) refuse("couldn't read the current auto-exit fee.");
       built = v3ExitEnable({ tokenId: id, draft: draft as ExitV3Draft, autoExit: to, gate: pool.gate, tickLower: p.tickLower, tickUpper: p.tickUpper, swapAllowed, exitFeeX64: fees.exitFeeX64!, change });
@@ -416,10 +463,10 @@ export async function planSetAutomation(ctx: GoatLpContext, input: SetAutomation
   if (v4c && (!Number.isInteger(v4c.runsToSign) || v4c.runsToSign < 1 || v4c.runsToSign > MAX_RUNS_PER_SESSION)) refuse(INVALID.runs);
   if (v4c && (!Number.isInteger(v4c.horizonDays) || v4c.horizonDays < 1 || v4c.horizonDays > HORIZON_MAX_DAYS)) refuse(INVALID.horizon);
   const sign = v4c && mode !== 'change' ? { count: v4c.runsToSign, deadline: BigInt(nowSec + v4c.horizonDays * DAY) } : undefined;
-  const stepsBuilt = mode === 'sign' ? null : turnOnSteps({ kind, venue, tokenId: id, spenders: g.spenders, approved, turnOn, change, sign });
+  const stepsBuilt = mode === 'sign' ? null : turnOnSteps({ kind, venue, tokenId: id, spenders: g.spenders, approved, turnOn, change, sign, forAll });
   if (stepsBuilt && !stepsBuilt.ok) refuse(stepsBuilt.errors.join(' '));
   const intentOf = (k: string): GuardIntent => (k === 'allow' ? 'allow' : change ? 'change' : 'turn-on');
-  const guardX = { kind, venue, pool: { ...pool, tickLower: p.tickLower, tickUpper: p.tickUpper, swapAllowed }, activeKinds: g.onKinds };
+  const guardX = { kind, venue, pool: { ...pool, tickLower: p.tickLower, tickUpper: p.tickUpper, swapAllowed }, activeKinds: g.onKinds, ...(many ? { batchIds: many } : {}) };
   const steps: PlanStep[] = [];
   const sessions: SignedSession[] = [];
   for (const s of stepsBuilt?.value ?? [{ key: 'sign' as const, label: STEP.sign(sign!.count), calls: [], sign }]) {
@@ -431,7 +478,7 @@ export async function planSetAutomation(ctx: GoatLpContext, input: SetAutomation
   for (const s of steps) {
     if (s.kind !== 'tx') continue;
     const call = { to: s.to, data: s.data, value: s.value };
-    const isAllow = s.label === STEP.allow;
+    const isAllow = s.label === STEP.allow || s.label === STEP.allowAll;
     const v = assertAutomationTx({ ...call, chainId: GOAT_CHAIN_ID }, guardCtx(ctx, g, {
       ...guardX, intent: isAllow ? 'allow' : change ? 'change' : 'turn-on', chainId: g.env.chainId, account: signer.address, ownerOnChain: g.f.owner as Address,
       currentApproved: approved, tokenId: id,
@@ -440,6 +487,11 @@ export async function planSetAutomation(ctx: GoatLpContext, input: SetAutomation
   }
   // the size-limit line belongs to plans that swap: auto-range and swap exits
   const notes = kv.lines.filter((l) => l.level !== 'block' && !(l.code === 'SIZE_LIMITED' && draft.kind === 'exit' && !swapSide)).map((l) => l.text);
+  const old = g.f.earlierRules?.[kind];
+  if (old && old !== 'unknown' && old.on) notes.push(`${KIND_NAME[kind]}: ${EARLIER_RULE}`);
+  if (old === 'unknown') notes.push("Couldn't read the earlier Goat LP contracts for a rule on this position.");
+  if (many) notes.push(`This rule moves in steps: the change is saved on all ${many.length} positions of the rule (${many.join(', ')}) in one transaction.`);
+  if (family && !family.complete) notes.push("Couldn't list every position of this rule. A position the steps made earlier may keep the old settings: change it the same way.");
   return {
     tool: `goatlp_set_auto_${kind}`,
     view: {
@@ -449,7 +501,9 @@ export async function planSetAutomation(ctx: GoatLpContext, input: SetAutomation
       fee: feeLine(g, kind, venue),
       permission: kind === 'compound' && venue === 'v4'
         ? 'No permission on the position NFT: each run uses one signed message, valid only for GoatAutoCompoundV4, this position and until the end date.'
-        : `This position only, to ${pinOf(spenderFor(kind, venue, g.spenders) ?? '')?.pin.name ?? 'the automation contract'}. Never a permission for all positions.`,
+        : kind === 'range'
+          ? `All your ${VENUE_NAME[venue]} positions in this wallet, to ${pinOf(spenderFor(kind, venue, g.spenders) ?? '')?.pin.name ?? 'the automation contract'}. It acts only on positions where auto-range is on.`
+          : `This position only, to ${pinOf(spenderFor(kind, venue, g.spenders) ?? '')?.pin.name ?? 'the automation contract'}. Never a permission for all positions.`,
       ...(notes.length ? { notes } : {}),
     },
     steps,
@@ -538,25 +592,43 @@ function postStep(ctx: GoatLpContext, id: bigint, sessions: SignedSession[]): Wo
 
 export interface StopInput { kind: Kind; venue: Venue; id: string }
 
-export async function planStop(ctx: GoatLpContext, input: StopInput): Promise<BuiltPlan> {
-  const id = BigInt(input.id);
-  const { kind, venue } = input;
-  const g = await gather(ctx, venue, id);
+/** One generation's part of a stop */
+interface StopPart {
+  gen: Gen;
+  calls: AutoCall[];
+  revokeNonces: bigint[];
+  signedNote?: string;
+  ruleOn: boolean;
+  r: RuleRead | null;
+  spenders: Spenders;
+  forAll: boolean | 'unknown';
+  forAllSpender: Address | null;
+  family: RuleFamily | null;
+}
+
+const GEN_TAG: Readonly<Record<Gen, string>> = { r4: '', r3: ' (earlier contracts)' };
+
+/** The calls that stop (kind, venue) on one generation, or why that generation has nothing to read */
+async function stopPart(ctx: GoatLpContext, g: Gathered, kind: Kind, venue: Venue, id: bigint, gen: Gen): Promise<StopPart | { skip: string }> {
   const signer = ctx.signer!;
+  const isOld = gen === 'r3';
   const key = contractFor(kind, venue);
-  if (!g.env.gates[key].ok) refuse(`${KIND_NAME[kind]} on ${VENUE_NAME[venue]}: ${g.env.gates[key].reason}`);
-  const r = g.f.rules?.[kind];
-  if (r === 'unknown' || r === undefined) refuse(`couldn't read the ${KIND_NAME[kind].toLowerCase()} rule of this position on chain.`);
+  const gates = isOld ? g.env.earlier.gates : g.env.gates;
+  if (!gates[key].ok) return { skip: gates[key].reason };
+  const targets = isOld ? TARGETS_R3 : TARGETS;
+  const spenders: Spenders = isOld ? g.env.earlier.spenders : g.spenders;
+  const r = (isOld ? g.f.earlierRules : g.f.rules)?.[kind];
+  if (r === 'unknown' || r === undefined) refuse(`couldn't read the ${KIND_NAME[kind].toLowerCase()} rule of this position on chain${GEN_TAG[gen]}.`);
   const approved = g.f.approved === 'unknown' ? refuse("couldn't read this position's permission on chain.") : g.f.approved ?? null;
   const ruleOn = !!r && r.on;
   let revokeNonces: bigint[] = [];
   let signedNote: string | undefined;
   if (kind === 'compound' && venue === 'v4') {
-    // the union of the keeper store's sessions, this server's record and the chain's scan
-    const gac4 = TARGETS.autoCompoundV4;
+    // the union of the keeper store's sessions, this server's record and the chain's scan, in this contract's nonce window
+    const gac4 = targets.autoCompoundV4;
     const base = permitWord(gac4, id);
     const owner = signer.address;
-    const stored = await listStoredSessions(ctx.api, id);
+    const stored = isOld ? null : await listStoredSessions(ctx.api, id);
     const store = ownSessions(base, stored?.sessions ?? []);
     const local = ownSessions(base, ctx.sessions.list(owner, id));
     const read = (o: Address, w: bigint) => ctx.chain.read<bigint>({ address: POSM, abi: posmAbi, functionName: 'nonces', args: [o, w] });
@@ -564,78 +636,119 @@ export async function planStop(ctx: GoatLpContext, input: StopInput): Promise<Bu
     const bitmaps = new Map(scan.bitmaps);
     for (const s of [...store, ...local]) if (!bitmaps.has(String(s.word))) bitmaps.set(String(s.word), await read(owner, s.word));
     const u = sessionUnion(base, { store, local, scanWords: scan.words, bitmaps });
-    revokeNonces = revokeSet({ base, sessions: u.sessions, bitmaps });
-    signedNote = u.source === 'records' ? `${revokeNonces.length} signed and unused messages are cancelled.`
-      : u.source === 'union' ? `The keeper store, this server's record and the chain do not agree: every unused message any of them shows is cancelled (${revokeNonces.length}).`
-        : `No record of the signed messages: every unused nonce of this position's signing window that may hold one is cancelled (${revokeNonces.length}).`;
+    // the earlier contract: its messages are cancelled when its rule is on or a record or a used nonce shows a session
+    const anyUsed = scan.words.some((w) => (bitmaps.get(String(w)) ?? 0n) !== 0n);
+    revokeNonces = isOld && !ruleOn && !anyUsed && !store.length && !local.length ? [] : revokeSet({ base, sessions: u.sessions, bitmaps });
+    if (revokeNonces.length) {
+      signedNote = u.source === 'records' ? `${revokeNonces.length} signed and unused messages are cancelled${GEN_TAG[gen]}.`
+        : u.source === 'union' ? `The keeper store, this server's record and the chain do not agree: every unused message any of them shows is cancelled (${revokeNonces.length})${GEN_TAG[gen]}.`
+          : `No record of the signed messages: every unused nonce of this position's signing window that may hold one is cancelled (${revokeNonces.length})${GEN_TAG[gen]}.`;
+    }
   }
-  // an approval for all positions is never changed by this tool; the plan says when one is on
+  // a permission for all positions: kept on r4 (the user's other positions may use it), removed on the earlier contracts
   const nftOf = venue === 'v4' ? { address: POSM, abi: posmAbi } : { address: NPM, abi: npmAbi };
-  const forAllSpender = kind === 'compound' && venue === 'v4' ? g.spenders.autoCompoundV4 : spenderFor(kind, venue, g.spenders);
-  const forAll = forAllSpender
+  const forAllSpender = (kind === 'compound' && venue === 'v4' ? spenders.autoCompoundV4 : spenderFor(kind, venue, spenders)) ?? null;
+  const forAll: boolean | 'unknown' = forAllSpender
     ? await ctx.chain.read<boolean>({ ...nftOf, functionName: 'isApprovedForAll', args: [signer.address, forAllSpender] } as McCall).catch(() => 'unknown' as const)
     : false;
-  const plan = stopPlan(kind, venue, { tokenId: id, targets: TARGETS, spenders: g.spenders, approved, revokeNonces, ruleOn });
-  if (!plan.ok) refuse(plan.errors.join(' '));
-  const calls = (plan as { ok: true; value: AutoCall[] }).value;
-  if (!calls.length) refuse(`nothing to stop: ${KIND_NAME[kind].toLowerCase()} is off and no Goat LP permission or signed message is left on this position.`);
-  const guardX = { kind, venue, intent: 'stop' as const, revokeAllowed: revokeNonces, activeKinds: [] as Kind[] };
-  for (const call of calls) {
-    const v = assertAutomationTx({ to: call.to, data: call.data, value: call.value, chainId: GOAT_CHAIN_ID }, guardCtx(ctx, g, {
-      ...guardX, chainId: g.env.chainId, account: signer.address, ownerOnChain: g.f.owner as Address, currentApproved: approved, tokenId: id,
-    }));
-    if (!v.ok) refuse(`${v.reason} (${v.rule}).`);
+  let family: RuleFamily | null = null;
+  if (!isOld && kind === 'range' && ruleOn && r) {
+    family = await rangeFamily({ chain: ctx.chain, api: ctx.api, env: g.env, venue, id, owner: signer.address, rule: r, pool: venue === 'v4' ? g.pf.poolId ?? null : g.pf.pool ?? null });
   }
-  const steps: PlanStep[] = calls.map((call) => txStep(ctx, g, call, guardX, () => verifyCall(ctx, call)));
-  if (kind === 'compound' && venue === 'v4') {
+  const plan = stopPlan(kind, venue, {
+    tokenId: id, targets, spenders, approved, revokeNonces, ruleOn, ...(family ? { tokenIds: family.ids } : {}),
+    removeForAll: isOld && forAll === true ? forAllSpender : null,
+  });
+  if (!plan.ok) refuse(plan.errors.join(' '));
+  return { gen, calls: (plan as { ok: true; value: AutoCall[] }).value, revokeNonces, signedNote, ruleOn, r: r ?? null, spenders, forAll, forAllSpender, family };
+}
+
+export async function planStop(ctx: GoatLpContext, input: StopInput): Promise<BuiltPlan> {
+  const id = BigInt(input.id);
+  const { kind, venue } = input;
+  const g = await gather(ctx, venue, id);
+  const signer = ctx.signer!;
+  const tried = [await stopPart(ctx, g, kind, venue, id, 'r4'), await stopPart(ctx, g, kind, venue, id, 'r3')];
+  const parts = tried.filter((p): p is StopPart => !('skip' in p));
+  if (!parts.length) refuse(`${KIND_NAME[kind]} on ${VENUE_NAME[venue]}: ${(tried[1] as { skip: string }).skip}`);
+  const approved = g.f.approved === 'unknown' ? null : g.f.approved ?? null;
+  const steps: PlanStep[] = [];
+  for (const part of parts) {
+    const batchIds = part.family && part.family.ids.length > 1 ? part.family.ids : undefined;
+    const guardX: StepX = { kind, venue, intent: 'stop', revokeAllowed: part.revokeNonces, activeKinds: [] as Kind[], gen: part.gen, ...(batchIds ? { batchIds } : {}) };
+    for (const call of part.calls) {
+      const v = assertAutomationTx({ to: call.to, data: call.data, value: call.value, chainId: GOAT_CHAIN_ID }, guardCtx(ctx, g, {
+        ...guardX, chainId: g.env.chainId, account: signer.address, ownerOnChain: g.f.owner as Address, currentApproved: approved, tokenId: id,
+      }));
+      if (!v.ok) refuse(`${v.reason} (${v.rule}).`);
+      steps.push(txStep(ctx, g, call, guardX, () => verifyCall(ctx, call)));
+    }
+  }
+  if (!steps.length) refuse(`nothing to stop: ${KIND_NAME[kind].toLowerCase()} is off and no Goat LP permission or signed message is left on this position.`);
+  const r4 = parts.find((p) => p.gen === 'r4');
+  if (kind === 'compound' && venue === 'v4' && r4 && r4.calls.length) {
     const KEPT = 'The keeper store keeps the record until the chain shows the stop.';
     steps.push({
       kind: 'post', label: 'Ask the keeper store to drop the signed messages', key: `${id}|keeper-store-drop`,
       view: { type: 'hand-over', to: `${ctx.api.base}/automation/permits/${id}`, what: 'once the steps above are confirmed on chain' },
       run: async () => {
         ctx.sessions.clear(signer.address, id);
-        if (!(await stopShown(ctx, id, revokeNonces))) return { storeCleared: false, note: KEPT };
+        if (!(await stopShown(ctx, id, r4.revokeNonces, TARGETS.autoCompoundV4))) return { storeCleared: false, note: KEPT };
         const a = await dropStoredSessions(ctx.api, id);
         if (a.dropped) return { storeCleared: true };
         return { storeCleared: false, note: a.kept ? KEPT : 'The keeper store did not answer. The signed messages are cancelled on chain.' };
       },
     });
   }
-  const approvedHere = !!approved && isGoatSpender(approved, g.spenders);
+  const removes: string[] = [];
+  const notes: string[] = [];
+  for (const part of parts) {
+    const tag = GEN_TAG[part.gen];
+    const mine = kind === 'compound' && venue === 'v4' ? part.spenders.autoCompoundV4 : spenderFor(kind, venue, part.spenders);
+    const fam = part.family;
+    if (part.ruleOn) removes.push(fam && fam.ids.length > 1 ? `the ${KIND_NAME[kind].toLowerCase()} rule on all ${fam.ids.length} positions of the rule (${fam.ids.join(', ')})` : `the ${KIND_NAME[kind].toLowerCase()} rule${tag}`);
+    if (approved && mine && eq(approved, mine)) removes.push(`this automation's permission on the position${tag}`);
+    if (part.signedNote) removes.push(part.signedNote);
+    if (part.gen === 'r3' && part.forAll === true) removes.push(`the permission for all positions to ${pinOf(part.forAllSpender)?.pin.name ?? part.forAllSpender}${tag}`);
+    if (part.forAll === 'unknown' && part.gen === 'r3') notes.push(`Couldn't read whether an approval for all positions is on${tag}.`);
+    if (fam?.moving) notes.push('This rule is moving in steps: the stop reaches the position the steps go to as well.');
+    if (fam && !fam.complete) notes.push("Couldn't list every position of this rule. A position the steps made earlier may keep the rule: stop it the same way.");
+  }
+  const isGoat = (a: Address) => parts.some((p) => !!isGoatSpender(a, p.spenders));
+  const shown = parts.find((p) => p.gen === 'r4' && p.r) ?? parts.find((p) => p.r);
   return {
     tool: 'goatlp_stop_automation',
     view: {
       action: `Stop ${KIND_NAME[kind].toLowerCase()}`,
       position: positionView(g, venue, id),
-      ruleNow: r ? describeRule(r as RuleRead, decimalsOf(g.api), { tickLower: g.f.tickLower, tickUpper: g.f.tickUpper }) : { on: false },
-      removes: [
-        ...(ruleOn ? [`the ${KIND_NAME[kind].toLowerCase()} rule`] : []),
-        ...(approvedHere && eq(approved, kind === 'compound' && venue === 'v4' ? g.spenders.autoCompoundV4 : spenderFor(kind, venue, g.spenders)) ? ['this automation\'s permission on the position'] : []),
-        ...(signedNote ? [signedNote] : []),
-      ],
-      ...(approved && !approvedHere ? { leftAlone: `another app's approval (${approved}) is not touched` } : {}),
-      ...(forAll === true ? { allowForAll: `An approval for all positions to ${pinOf(forAllSpender)?.pin.name ?? forAllSpender} (${forAllSpender}) is still on. This tool never changes it; it can be removed in the Goat LP app.` } : {}),
-      ...(forAll === 'unknown' ? { allowForAll: "couldn't read whether an approval for all positions is on; this tool never changes one." } : {}),
+      ruleNow: shown?.r ? { ...describeRule(shown.r, decimalsOf(g.api), { tickLower: g.f.tickLower, tickUpper: g.f.tickUpper }), ...(shown.gen === 'r3' ? { contracts: 'earlier' } : {}) } : { on: false },
+      removes,
+      ...(approved && !isGoat(approved) ? { leftAlone: `another app's approval (${approved}) is not touched` } : {}),
+      ...(notes.length ? { notes } : {}),
+      ...(r4?.forAll === true ? { allowForAll: `An approval for all positions to ${pinOf(r4.forAllSpender)?.pin.name ?? r4.forAllSpender} (${r4.forAllSpender}) is still on. This tool never changes it; it can be removed in the Goat LP app.` } : {}),
+      ...(r4?.forAll === 'unknown' ? { allowForAll: "couldn't read whether an approval for all positions is on; this tool never changes one." } : {}),
       afterwards: 'The position stays as it is: same range and tokens, and fees keep accruing.',
     },
     steps,
     readBack: async () => {
       const [f] = await loadPositionFacts(ctx.chain, [{ id, venue }], await ctx.env());
       const rr = f.rules?.[kind];
-      return { ruleOn: rr === 'unknown' ? 'unknown' : !!rr && rr.on, permission: f.approved === 'unknown' ? 'unknown' : f.approved ?? 'none' };
+      const ro = f.earlierRules?.[kind];
+      const onOf = (x: typeof rr) => (x === undefined ? 'not checked' : x === 'unknown' ? 'unknown' : !!x && x.on);
+      return { ruleOn: onOf(rr), ...(ro !== undefined ? { earlierRuleOn: onOf(ro) } : {}), permission: f.approved === 'unknown' ? 'unknown' : f.approved ?? 'none' };
     },
   };
 }
 
 
 /** Does the chain show the v4 auto-compound stop: the rule off, the cancelled messages used up, no permission to it? */
-async function stopShown(ctx: GoatLpContext, id: bigint, revoked: readonly bigint[]): Promise<boolean> {
+async function stopShown(ctx: GoatLpContext, id: bigint, revoked: readonly bigint[], gac4: Address): Promise<boolean> {
   try {
     const owner = ctx.signer!.address;
-    const cfg = toGac4(await ctx.chain.read({ address: TARGETS.autoCompoundV4, abi: gac4Abi, functionName: 'configs', args: [id] }));
+    const cfg = toGac4(await ctx.chain.read({ address: gac4, abi: gac4Abi, functionName: 'configs', args: [id] }));
     if (cfg.enabled) return false;
     const approved = await ctx.chain.read<Address>({ address: POSM, abi: posmAbi, functionName: 'getApproved', args: [id] });
-    if (eq(approved, TARGETS.autoCompoundV4)) return false;
+    if (eq(approved, gac4)) return false;
     for (const n of revoked) {
       const bm = await ctx.chain.read<bigint>({ address: POSM, abi: posmAbi, functionName: 'nonces', args: [owner, n >> 8n] });
       if (!isUsed(bm, Number(n & 255n))) return false;

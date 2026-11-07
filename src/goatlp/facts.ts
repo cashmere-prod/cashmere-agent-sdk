@@ -1,8 +1,9 @@
 // Chain reads of the automation tools, through Multicall3 with allowFailure: a failed field is 'unknown', never "off".
 //  - the environment: chain id, the pin check of every contract, the addresses the pinned contracts name (they must equal
-//    the pins), and the contract state (paused, live fees, fee recipient);
-//  - pool facts (price references, registry and pair-table entries, hook entries and code hashes);
-//  - position facts (owner, permission, liquidity, range, every rule of the venue).
+//    the pins), and the contract state (paused, live fees, fee recipient), for the r4 contracts (every turn-on) and the
+//    earlier r3 contracts (reads and stops only);
+//  - pool facts (price references, registry and pair-table entries, hook entries and code hashes), on r4;
+//  - position facts (owner, permission, liquidity, range, every rule of the venue on r4, and on r3 as `earlierRules`).
 // The mappers from raw results to facts are pure and tested.
 import { encodeAbiParameters, keccak256, type Address, type Hex } from 'viem';
 import {
@@ -10,11 +11,12 @@ import {
   v3FactoryAbi,
 } from './abis';
 import {
-  AUTO_EXIT_V3, AUTO_RANGE_V3, GOAT_AUTO_COMPOUND_V3, GOAT_AUTO_COMPOUND_V4, GOAT_CHAIN_ID, GOAT_PAIR_TABLE, GOAT_PRICE_ANCHOR,
+  AUTO_EXIT_V3, AUTO_RANGE_V3, GOAT_AUTO_COMPOUND_V3, GOAT_AUTO_COMPOUND_V4, GOAT_CHAIN_ID, GOAT_PAIR_TABLE, GOAT_PIN_KEYS, GOAT_PRICE_ANCHOR,
   GOAT_TREASURY, GOAT_V4_COMPOUNDOR, GOAT_V4_PAIR_REGISTRY, GOAT_V4_STEWARD, GOAT_V4_STEWARD_ENGINE, NC_SRC_KINDS, NPM, PINS, POOL_MANAGER, POSM,
-  ST_MODE, V3_FACTORY, WETH, ZERO_ADDRESS, type PinKey,
+  R3_PINS, R4_READY, ST_MODE, V3_FACTORY, WETH, ZERO_ADDRESS, type GoatPinKey, type Pin, type PinKey,
 } from './constants';
 import { checkPins, type GoatChain, type McCall, type McRes, type PinResult } from './chain';
+import { R4_CLOSED } from './copy';
 import { autoCheckKey, needsCompoundHookRead, needsHookCodeHash } from './hooks';
 import type {
   AeConfig, ArConfig, ContractFacts, ContractGates, ContractKey, Gac3Config, Gac4Config, Kind, Maybe, PoolFacts, PositionFacts,
@@ -26,10 +28,19 @@ const isZero = (a: string | null | undefined) => !a || /^0x0{40}$/i.test(a);
 const native = (a: Address) => (isZero(a) ? WETH : a);
 const val = <T>(r: McRes | undefined): Maybe<T> => (r && r.status === 'success' ? (r.result as T) : 'unknown');
 
-/** The automation contracts at their pinned addresses */
-export const TARGETS: Readonly<Record<ContractKey, Address>> = Object.freeze({
-  autoCompoundV3: GOAT_AUTO_COMPOUND_V3, autoCompoundV4: GOAT_AUTO_COMPOUND_V4, rangeExitV3: AUTO_RANGE_V3, exitV3: AUTO_EXIT_V3, rangeExitV4: GOAT_V4_STEWARD,
+/** The Goat LP addresses of one generation */
+export type GenAddrs = Readonly<Record<GoatPinKey, Address>>;
+const addrsOf = (t: Readonly<Record<GoatPinKey, Pin>>): GenAddrs => Object.freeze(Object.fromEntries(GOAT_PIN_KEYS.map((k) => [k, t[k].address])) as Record<GoatPinKey, Address>);
+export const R4_ADDRS: GenAddrs = addrsOf(PINS);
+export const R3_ADDRS: GenAddrs = addrsOf(R3_PINS);
+const targetsOf = (a: GenAddrs): Readonly<Record<ContractKey, Address>> => Object.freeze({
+  autoCompoundV3: a.autoCompoundV3, autoCompoundV4: a.autoCompoundV4, rangeExitV3: a.rangeExitV3, exitV3: a.exitV3, rangeExitV4: a.rangeExitV4,
 });
+
+/** The r4 automation contracts (every turn-on, change and stop of an r4 rule) */
+export const TARGETS: Readonly<Record<ContractKey, Address>> = targetsOf(R4_ADDRS);
+/** The earlier automation contracts (stops only) */
+export const TARGETS_R3: Readonly<Record<ContractKey, Address>> = targetsOf(R3_ADDRS);
 
 /** The contracts each automation needs pinned (its own code, its spender, its fee taker, its read sources, the NFT manager) */
 export const PINS_OF: Readonly<Record<ContractKey, readonly PinKey[]>> = {
@@ -40,50 +51,67 @@ export const PINS_OF: Readonly<Record<ContractKey, readonly PinKey[]>> = {
   rangeExitV4: ['rangeExitV4', 'engine', 'registry', 'posm', 'multicall3'],
 };
 export const ALL_PIN_KEYS = Object.keys(PINS) as PinKey[];
+const SHARED_PIN_KEYS = ALL_PIN_KEYS.filter((k) => !(GOAT_PIN_KEYS as readonly string[]).includes(k));
 
 /** The addresses the pinned contracts name in their immutables (they must equal the pins) */
 export interface Derived { engine?: Address; registry?: Address; gv4c?: Address; priceAnchorV3?: Address; priceAnchorV4?: Address; pairTableR?: Address; pairTableE?: Address; posmOfSteward?: Address; posmOfGac4?: Address; npmOfGac3?: Address }
 
-export interface GoatEnv {
-  chainId: number;
+/** The earlier contracts: what a stop needs (their pins, gates and spenders). No rule is turned on there. */
+export interface EarlierEnv {
   pins: Record<PinKey, PinResult>;
   derived: Derived;
-  /** per automation contract: may it be used now? */
+  gates: ContractGates;
+  targets: Readonly<Record<ContractKey, Address>>;
+  spenders: Partial<Record<ContractKey, Address>>;
+}
+
+export interface GoatEnv {
+  chainId: number;
+  /** r4 Goat LP pins and the shared pins */
+  pins: Record<PinKey, PinResult>;
+  derived: Derived;
+  /** per r4 automation contract: may it be used now? All closed while the r4 values are placeholders. */
   gates: ContractGates;
   targets: Readonly<Record<ContractKey, Address>>;
   contracts: ContractFacts;
+  /** the earlier (r3) contracts, for reads and stops */
+  earlier: EarlierEnv;
   /** unix seconds of the latest block when the environment was read */
   blockTime: number;
 }
 
-const DERIVED_CALLS: readonly [keyof Derived, McCall][] = [
-  ['engine', { address: GOAT_V4_STEWARD, abi: stewardAbi, functionName: 'ENGINE' }],
-  ['registry', { address: GOAT_V4_STEWARD, abi: stewardAbi, functionName: 'REGISTRY' }],
-  ['posmOfSteward', { address: GOAT_V4_STEWARD, abi: stewardAbi, functionName: 'POSM' }],
-  ['gv4c', { address: GOAT_AUTO_COMPOUND_V4, abi: gac4Abi, functionName: 'compoundor' }],
-  ['posmOfGac4', { address: GOAT_AUTO_COMPOUND_V4, abi: gac4Abi, functionName: 'positionManager' }],
-  ['priceAnchorV3', { address: GOAT_AUTO_COMPOUND_V3, abi: gac3Abi, functionName: 'priceAnchor' }],
-  ['npmOfGac3', { address: GOAT_AUTO_COMPOUND_V3, abi: gac3Abi, functionName: 'nonfungiblePositionManager' }],
-  ['priceAnchorV4', { address: GOAT_V4_COMPOUNDOR, abi: gv4cAbi, functionName: 'priceAnchor' }],
-  ['pairTableR', { address: AUTO_RANGE_V3, abi: autoRangeAbi, functionName: 'pairTable' }],
-  ['pairTableE', { address: AUTO_EXIT_V3, abi: autoExitAbi, functionName: 'pairTable' }],
-];
+export function derivedCalls(a: GenAddrs): readonly [keyof Derived, McCall][] {
+  return [
+    ['engine', { address: a.rangeExitV4, abi: stewardAbi, functionName: 'ENGINE' }],
+    ['registry', { address: a.rangeExitV4, abi: stewardAbi, functionName: 'REGISTRY' }],
+    ['posmOfSteward', { address: a.rangeExitV4, abi: stewardAbi, functionName: 'POSM' }],
+    ['gv4c', { address: a.autoCompoundV4, abi: gac4Abi, functionName: 'compoundor' }],
+    ['posmOfGac4', { address: a.autoCompoundV4, abi: gac4Abi, functionName: 'positionManager' }],
+    ['priceAnchorV3', { address: a.autoCompoundV3, abi: gac3Abi, functionName: 'priceAnchor' }],
+    ['npmOfGac3', { address: a.autoCompoundV3, abi: gac3Abi, functionName: 'nonfungiblePositionManager' }],
+    ['priceAnchorV4', { address: a.compoundorV4, abi: gv4cAbi, functionName: 'priceAnchor' }],
+    ['pairTableR', { address: a.rangeExitV3, abi: autoRangeAbi, functionName: 'pairTable' }],
+    ['pairTableE', { address: a.exitV3, abi: autoExitAbi, functionName: 'pairTable' }],
+  ];
+}
 
 /** What each derived address must equal, and which automation it belongs to */
-const DERIVED_EXPECT: Readonly<Record<keyof Derived, { want: Address; of: ContractKey }>> = {
-  engine: { want: GOAT_V4_STEWARD_ENGINE, of: 'rangeExitV4' },
-  registry: { want: GOAT_V4_PAIR_REGISTRY, of: 'rangeExitV4' },
-  posmOfSteward: { want: POSM, of: 'rangeExitV4' },
-  gv4c: { want: GOAT_V4_COMPOUNDOR, of: 'autoCompoundV4' },
-  posmOfGac4: { want: POSM, of: 'autoCompoundV4' },
-  priceAnchorV3: { want: GOAT_PRICE_ANCHOR, of: 'autoCompoundV3' },
-  npmOfGac3: { want: NPM, of: 'autoCompoundV3' },
-  priceAnchorV4: { want: GOAT_PRICE_ANCHOR, of: 'autoCompoundV4' },
-  pairTableR: { want: GOAT_PAIR_TABLE, of: 'rangeExitV3' },
-  pairTableE: { want: GOAT_PAIR_TABLE, of: 'exitV3' },
-};
+export function derivedExpect(a: GenAddrs): Readonly<Record<keyof Derived, { want: Address; of: ContractKey }>> {
+  return {
+    engine: { want: a.engine, of: 'rangeExitV4' },
+    registry: { want: a.registry, of: 'rangeExitV4' },
+    posmOfSteward: { want: POSM, of: 'rangeExitV4' },
+    gv4c: { want: a.compoundorV4, of: 'autoCompoundV4' },
+    posmOfGac4: { want: POSM, of: 'autoCompoundV4' },
+    priceAnchorV3: { want: a.priceAnchor, of: 'autoCompoundV3' },
+    npmOfGac3: { want: NPM, of: 'autoCompoundV3' },
+    priceAnchorV4: { want: a.priceAnchor, of: 'autoCompoundV4' },
+    pairTableR: { want: a.pairTable, of: 'rangeExitV3' },
+    pairTableE: { want: a.pairTable, of: 'exitV3' },
+  };
+}
 
-/** The contract-state reads: [key, call] */
+/** The contract-state reads of the r4 contracts: [key, call] */
 const STATE_CALLS: readonly [string, McCall][] = [
   ['p:autoCompoundV3', { address: GOAT_AUTO_COMPOUND_V3, abi: gac3Abi, functionName: 'paused' }],
   ['fee:compound:v3', { address: GOAT_AUTO_COMPOUND_V3, abi: gac3Abi, functionName: 'totalRewardX64' }],
@@ -107,8 +135,15 @@ const STATE_CALLS: readonly [string, McCall][] = [
 
 const X64_TO_BPS = (x: bigint) => Number((x * 10_000n + (1n << 63n)) >> 64n);
 
-/** Map the contract-state results to ContractFacts. Pure. */
-export function contractFactsFrom(res: readonly McRes[], derived: Derived): ContractFacts {
+/** The spenders of one generation: the four contracts and the Steward's ENGINE() when it equals the pinned engine. Pure. */
+export function spendersOf(a: GenAddrs, derived: Derived): Partial<Record<ContractKey, Address>> {
+  const s: Partial<Record<ContractKey, Address>> = { autoCompoundV3: a.autoCompoundV3, autoCompoundV4: a.autoCompoundV4, rangeExitV3: a.rangeExitV3, exitV3: a.exitV3 };
+  if (derived.engine && eqA(derived.engine, a.engine)) s.rangeExitV4 = a.engine;
+  return s;
+}
+
+/** Map the r4 contract-state results to ContractFacts. Pure. While the r4 values are placeholders there are no spenders. */
+export function contractFactsFrom(res: readonly McRes[], derived: Derived, ready: boolean = R4_READY): ContractFacts {
   const f: ContractFacts = { paused: {}, feesBps: {}, treasuryOk: {}, spenders: {}, feesX64: {} };
   STATE_CALLS.forEach(([k], i) => {
     const r = res[i];
@@ -126,39 +161,57 @@ export function contractFactsFrom(res: readonly McRes[], derived: Derived): Cont
       if (venue === 'v3' && kind === 'exit') f.feesX64!.exitFeeX64 = BigInt(v as bigint);
     }
   });
-  f.spenders = { autoCompoundV3: GOAT_AUTO_COMPOUND_V3, autoCompoundV4: GOAT_AUTO_COMPOUND_V4, rangeExitV3: AUTO_RANGE_V3, exitV3: AUTO_EXIT_V3 };
-  if (derived.engine && eqA(derived.engine, GOAT_V4_STEWARD_ENGINE)) f.spenders.rangeExitV4 = GOAT_V4_STEWARD_ENGINE;
+  f.spenders = ready ? spendersOf(R4_ADDRS, derived) : {};
   return f;
 }
 
-/** The gates from the pin results and the derived addresses. Pure. */
-export function gatesFrom(chainId: number, pins: Record<PinKey, PinResult>, derived: Derived): ContractGates {
+/** The gates from the pin results and the derived addresses. Pure. `a` = the generation's addresses (default r4). */
+export function gatesFrom(chainId: number, pins: Record<PinKey, PinResult>, derived: Derived, a: GenAddrs = R4_ADDRS, names: Readonly<Record<GoatPinKey, Pin>> = PINS): ContractGates {
   const out = {} as Record<ContractKey, { ok: boolean; reason: string }>;
+  const expect = derivedExpect(a);
   for (const key of Object.keys(TARGETS) as ContractKey[]) {
     if (chainId !== GOAT_CHAIN_ID) { out[key] = { ok: false, reason: `The RPC is on chain ${chainId}, not Robinhood Chain (4663).` }; continue; }
     const bad = PINS_OF[key].map((k) => pins[k]).find((p) => !p?.ok);
     if (bad) { out[key] = { ok: false, reason: bad.reason }; continue; }
-    const wrong = (Object.entries(DERIVED_EXPECT) as [keyof Derived, { want: Address; of: ContractKey }][])
+    const wrong = (Object.entries(expect) as [keyof Derived, { want: Address; of: ContractKey }][])
       .find(([d, e]) => e.of === key && !eqA(derived[d], e.want));
-    if (wrong) { out[key] = { ok: false, reason: `${PINS[key === 'rangeExitV4' ? 'rangeExitV4' : key].name} names an unexpected ${String(wrong[0])} address, or it could not be read.` }; continue; }
+    if (wrong) { out[key] = { ok: false, reason: `${names[key].name} names an unexpected ${String(wrong[0])} address, or it could not be read.` }; continue; }
     out[key] = { ok: true, reason: 'Every contract this automation uses matches its pinned build.' };
   }
   return out;
 }
 
-/** Read the environment: chain id, the pins, the derived addresses and the contract state. */
+/** The r4 pins while their values are placeholders: closed, with one plain line, and no read of a placeholder address */
+function closedR4Pins(): Record<GoatPinKey, PinResult> {
+  return Object.fromEntries(GOAT_PIN_KEYS.map((k) => [k, { ok: false, codehash: null, reason: R4_CLOSED }])) as Record<GoatPinKey, PinResult>;
+}
+
+/** Read the environment: chain id, the pins, the derived addresses and the contract state, of r4 and of the earlier contracts. */
 export async function loadEnv(chain: GoatChain): Promise<GoatEnv> {
-  const [chainId, pins, blockTime] = await Promise.all([chain.chainId(), checkPins(chain, ALL_PIN_KEYS), chain.blockTimestamp().catch(() => Math.floor(Date.now() / 1000))]);
+  const r4Keys: PinKey[] = R4_READY ? ALL_PIN_KEYS : SHARED_PIN_KEYS;
+  const [chainId, pinsRead, oldPins, blockTime] = await Promise.all([
+    chain.chainId(), checkPins(chain, r4Keys), checkPins(chain, GOAT_PIN_KEYS, R3_PINS),
+    chain.blockTimestamp().catch(() => Math.floor(Date.now() / 1000)),
+  ]);
+  const pins = (R4_READY ? pinsRead : { ...pinsRead, ...closedR4Pins() }) as Record<PinKey, PinResult>;
+  const shared = Object.fromEntries(SHARED_PIN_KEYS.map((k) => [k, pins[k]])) as Record<PinKey, PinResult>;
+  const earlierPins = { ...shared, ...oldPins } as Record<PinKey, PinResult>;
   let derived: Derived = {};
+  let earlierDerived: Derived = {};
   let state: McRes[] = [];
   if (chainId === GOAT_CHAIN_ID && pins.multicall3.ok) {
-    const res = await chain.multicall([...DERIVED_CALLS.map(([, c]) => c), ...STATE_CALLS.map(([, c]) => c)]);
-    derived = {};
-    DERIVED_CALLS.forEach(([k], i) => { const r = res[i]; if (r?.status === 'success') derived[k] = r.result as Address; });
-    state = res.slice(DERIVED_CALLS.length);
+    const d4 = R4_READY ? derivedCalls(R4_ADDRS) : [];
+    const s4 = R4_READY ? STATE_CALLS : [];
+    const d3 = derivedCalls(R3_ADDRS);
+    const res = await chain.multicall([...d4.map(([, c]) => c), ...s4.map(([, c]) => c), ...d3.map(([, c]) => c)]);
+    d4.forEach(([k], i) => { const r = res[i]; if (r?.status === 'success') derived[k] = r.result as Address; });
+    state = res.slice(d4.length, d4.length + s4.length);
+    d3.forEach(([k], i) => { const r = res[d4.length + s4.length + i]; if (r?.status === 'success') earlierDerived[k] = r.result as Address; });
   }
   const gates = gatesFrom(chainId, pins, derived);
-  return { chainId, pins, derived, gates, targets: TARGETS, contracts: contractFactsFrom(state, derived), blockTime };
+  const earlierGates = gatesFrom(chainId, earlierPins, earlierDerived, R3_ADDRS, R3_PINS);
+  const earlier: EarlierEnv = { pins: earlierPins, derived: earlierDerived, gates: earlierGates, targets: TARGETS_R3, spenders: spendersOf(R3_ADDRS, earlierDerived) };
+  return { chainId, pins, derived, gates, targets: TARGETS, contracts: contractFactsFrom(state, derived), earlier, blockTime };
 }
 
 // ------------------------------------------------------------------ pool facts
@@ -334,8 +387,9 @@ export function poolFactsFrom(p: PoolFacts, r: Record<string, McRes | undefined>
 
 export interface PositionRef { id: bigint; venue: Venue }
 
-/** Owner, permission, liquidity, range, pool key and every rule of the venue, 20 positions per multicall. */
-export async function loadPositionFacts(chain: GoatChain, refs: readonly PositionRef[], env: Pick<GoatEnv, 'gates'>): Promise<PositionFacts[]> {
+/** Owner, permission, liquidity, range, pool key and every rule of the venue (r4, and the earlier contracts when `env.earlier`
+ *  is given), 20 positions per multicall. */
+export async function loadPositionFacts(chain: GoatChain, refs: readonly PositionRef[], env: Pick<GoatEnv, 'gates'> & { earlier?: Pick<EarlierEnv, 'gates'> }): Promise<PositionFacts[]> {
   const out: PositionFacts[] = [];
   for (let s = 0; s < refs.length; s += 20) {
     const chunk = refs.slice(s, s + 20);
@@ -350,7 +404,8 @@ export async function loadPositionFacts(chain: GoatChain, refs: readonly Positio
         push(i, 'info', { address: POSM, abi: posmAbi, functionName: 'getPoolAndPositionInfo', args: [p.id] });
         push(i, 'liq', { address: POSM, abi: posmAbi, functionName: 'getPositionLiquidity', args: [p.id] });
       } else push(i, 'pos', { address: NPM, abi: npmAbi, functionName: 'positions', args: [p.id] });
-      for (const [field, call] of ruleReads(p.venue, env, p.id)) push(i, field, call);
+      for (const [field, call] of ruleReads(p.venue, env.gates, R4_ADDRS, p.id, 'rule')) push(i, field, call);
+      if (env.earlier) for (const [field, call] of ruleReads(p.venue, env.earlier.gates, R3_ADDRS, p.id, 'old')) push(i, field, call);
     });
     const res = await chain.multicall(calls).catch((error: unknown): McRes[] => calls.map(() => ({ status: 'failure', error })));
     const raw: Record<string, McRes>[] = chunk.map(() => ({}));
@@ -360,23 +415,23 @@ export async function loadPositionFacts(chain: GoatChain, refs: readonly Positio
   return out;
 }
 
-/** Rule reads of the contracts whose gate is ok: [field, call]. Fields rule:<kind> and rule:<kind>Owner. */
-function ruleReads(venue: Venue, env: Pick<GoatEnv, 'gates'>, id: bigint): [string, McCall][] {
+/** Rule reads of the contracts whose gate is ok: [field, call]. Fields <prefix>:<kind> and <prefix>:<kind>Owner; the r4
+ *  reads also take the Steward's previewTrigger. */
+function ruleReads(venue: Venue, g: ContractGates, a: GenAddrs, id: bigint, prefix: 'rule' | 'old'): [string, McCall][] {
   const r: [string, McCall][] = [];
-  const g = env.gates;
   const pair = (kind: Kind, address: Address, abi: readonly unknown[], cfgFn: string, ownerFn: string) => {
-    r.push([`rule:${kind}`, { address, abi, functionName: cfgFn, args: [id] }]);
-    r.push([`rule:${kind}Owner`, { address, abi, functionName: ownerFn, args: [id] }]);
+    r.push([`${prefix}:${kind}`, { address, abi, functionName: cfgFn, args: [id] }]);
+    r.push([`${prefix}:${kind}Owner`, { address, abi, functionName: ownerFn, args: [id] }]);
   };
   if (venue === 'v3') {
-    if (g.autoCompoundV3.ok) pair('compound', GOAT_AUTO_COMPOUND_V3, gac3Abi, 'configs', 'configOwner');
-    if (g.rangeExitV3.ok) pair('range', AUTO_RANGE_V3, autoRangeAbi, 'positionConfigs', 'positionConfigOwners');
-    if (g.exitV3.ok) pair('exit', AUTO_EXIT_V3, autoExitAbi, 'positionConfigs', 'positionConfigOwners');
+    if (g.autoCompoundV3.ok) pair('compound', a.autoCompoundV3, gac3Abi, 'configs', 'configOwner');
+    if (g.rangeExitV3.ok) pair('range', a.rangeExitV3, autoRangeAbi, 'positionConfigs', 'positionConfigOwners');
+    if (g.exitV3.ok) pair('exit', a.exitV3, autoExitAbi, 'positionConfigs', 'positionConfigOwners');
   } else {
-    if (g.autoCompoundV4.ok) pair('compound', GOAT_AUTO_COMPOUND_V4, gac4Abi, 'configs', 'configOwner');
+    if (g.autoCompoundV4.ok) pair('compound', a.autoCompoundV4, gac4Abi, 'configs', 'configOwner');
     if (g.rangeExitV4.ok) {
-      r.push(['rule:range', { address: GOAT_V4_STEWARD, abi: stewardAbi, functionName: 'configOf', args: [id] }]);
-      r.push(['preview', { address: GOAT_V4_STEWARD, abi: stewardAbi, functionName: 'previewTrigger', args: [id] }]);
+      r.push([`${prefix}:range`, { address: a.rangeExitV4, abi: stewardAbi, functionName: 'configOf', args: [id] }]);
+      if (prefix === 'rule') r.push(['preview', { address: a.rangeExitV4, abi: stewardAbi, functionName: 'previewTrigger', args: [id] }]);
     }
   }
   return r;
@@ -438,24 +493,8 @@ export function positionFactsFrom(p: PositionRef, r: Record<string, McRes | unde
       tickSpacing = V3_SPACING[fee] ?? 1;
     }
   }
-  const rules: PositionFacts['rules'] = {};
-  const ownerOf = (k: string): Address | null => { const o = val<Address>(r[`rule:${k}Owner`]); return o === 'unknown' || isZero(o) ? null : o; };
-  if ('rule:compound' in r) {
-    const c = val<unknown>(r['rule:compound']);
-    rules.compound = c === 'unknown' ? 'unknown' : p.venue === 'v4'
-      ? ruleRead('compound', 'v4', toGac4(c), ownerOf('compound')) : ruleRead('compound', 'v3', toGac3(c), ownerOf('compound'));
-  }
-  if (p.venue === 'v4' && 'rule:range' in r) {
-    const c = val<readonly [unknown, Address]>(r['rule:range']);
-    if (c === 'unknown') { rules.range = 'unknown'; rules.exit = 'unknown'; }
-    else {
-      const cfg = toSt(c[0]); const own = isZero(c[1]) ? null : c[1];
-      rules.range = ruleRead('range', 'v4', cfg, own); rules.exit = ruleRead('exit', 'v4', cfg, own);
-    }
-  } else {
-    if ('rule:range' in r) { const c = val<unknown>(r['rule:range']); rules.range = c === 'unknown' ? 'unknown' : ruleRead('range', 'v3', toAr(c), ownerOf('range')); }
-    if ('rule:exit' in r) { const c = val<unknown>(r['rule:exit']); rules.exit = c === 'unknown' ? 'unknown' : ruleRead('exit', 'v3', toAe(c), ownerOf('exit')); }
-  }
+  const rules = rulesFrom(p, r, 'rule');
+  const earlierRules = rulesFrom(p, r, 'old');
   let preview: PositionFacts['preview'];
   if ('preview' in r && p.venue === 'v4') {
     const pv = val<readonly [boolean, boolean, Hex]>(r.preview);
@@ -466,9 +505,33 @@ export function positionFactsFrom(p: PositionRef, r: Record<string, McRes | unde
   const burned = owner === 'unknown' && isBurnedError(r.owner);
   return {
     id: p.id, venue: p.venue, owner, ...(burned ? { burned: true } : {}), approved: approved === 'unknown' ? 'unknown' : isZero(approved) ? null : approved,
-    liquidity, tickLower, tickUpper, tickSpacing, ...(subscriber !== undefined ? { subscriber } : {}), rules, ...(preview !== undefined ? { preview } : {}),
+    liquidity, tickLower, tickUpper, tickSpacing, ...(subscriber !== undefined ? { subscriber } : {}), rules,
+    ...(Object.keys(earlierRules).length ? { earlierRules } : {}), ...(preview !== undefined ? { preview } : {}),
     ...(token0 ? { token0, token1, fee } : {}), ...(hooks ? { hooks } : {}),
   };
+}
+
+/** The rules of one generation from the raw reads (prefix 'rule' = r4, 'old' = the earlier contracts). Pure. */
+function rulesFrom(p: PositionRef, r: Record<string, McRes | undefined>, prefix: 'rule' | 'old'): NonNullable<PositionFacts['rules']> {
+  const rules: NonNullable<PositionFacts['rules']> = {};
+  const ownerOf = (k: string): Address | null => { const o = val<Address>(r[`${prefix}:${k}Owner`]); return o === 'unknown' || isZero(o) ? null : o; };
+  if (`${prefix}:compound` in r) {
+    const c = val<unknown>(r[`${prefix}:compound`]);
+    rules.compound = c === 'unknown' ? 'unknown' : p.venue === 'v4'
+      ? ruleRead('compound', 'v4', toGac4(c), ownerOf('compound')) : ruleRead('compound', 'v3', toGac3(c), ownerOf('compound'));
+  }
+  if (p.venue === 'v4' && `${prefix}:range` in r) {
+    const c = val<readonly [unknown, Address]>(r[`${prefix}:range`]);
+    if (c === 'unknown') { rules.range = 'unknown'; rules.exit = 'unknown'; }
+    else {
+      const cfg = toSt(c[0]); const own = isZero(c[1]) ? null : c[1];
+      rules.range = ruleRead('range', 'v4', cfg, own); rules.exit = ruleRead('exit', 'v4', cfg, own);
+    }
+  } else {
+    if (`${prefix}:range` in r) { const c = val<unknown>(r[`${prefix}:range`]); rules.range = c === 'unknown' ? 'unknown' : ruleRead('range', 'v3', toAr(c), ownerOf('range')); }
+    if (`${prefix}:exit` in r) { const c = val<unknown>(r[`${prefix}:exit`]); rules.exit = c === 'unknown' ? 'unknown' : ruleRead('exit', 'v3', toAe(c), ownerOf('exit')); }
+  }
+  return rules;
 }
 
 /** Is a rule read on? Compound: enabled; v4: the Steward mode of the kind; v3 range: deltas differ; v3 exit: active. */

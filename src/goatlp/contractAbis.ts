@@ -157,12 +157,20 @@ export const stewardAbi = [
   {"type":"error","name":"TimelockExpired","inputs":[]},
   {"type":"error","name":"TimelockNotReady","inputs":[]},
   {"type":"error","name":"TooSoon","inputs":[]},
+  {"type":"function","name":"clearConfigs","inputs":[{"name":"tokenIds","type":"uint256[]"}],"outputs":[],"stateMutability":"nonpayable"},
+  {"type":"function","name":"setRangeConfigs","inputs":[{"name":"tokenIds","type":"uint256[]"},{"name":"p","type":"tuple","components":[{"name":"triggerTicks","type":"uint16"},{"name":"slippageBps","type":"uint16"},{"name":"minInterval","type":"uint32"},{"name":"budget","type":"uint8"},{"name":"standing","type":"bool"},{"name":"maxSwapFeePips","type":"uint24"}]}],"outputs":[],"stateMutability":"nonpayable"},
+  {"type":"function","name":"pieceDest","inputs":[{"name":"","type":"uint256"}],"outputs":[{"name":"","type":"uint256"}],"stateMutability":"view"},
+  {"type":"function","name":"statusOf","inputs":[{"name":"tokenId","type":"uint256"}],"outputs":[{"name":"s","type":"tuple","components":[{"name":"mode","type":"uint8"},{"name":"ready","type":"bool"},{"name":"reason","type":"bytes4"},{"name":"nextRunAt","type":"uint40"},{"name":"movesLeft","type":"uint8"},{"name":"permissionOk","type":"bool"},{"name":"versionOk","type":"bool"},{"name":"swapsOpen","type":"bool"}]}],"stateMutability":"view"},
+  {"type":"error","name":"StandingRequired","inputs":[]},
+  {"type":"error","name":"AllPositionsApprovalRequired","inputs":[]},
+  {"type":"error","name":"DepthRoomExceeded","inputs":[{"name":"valueUsd8","type":"uint256"},{"name":"roomUsd8","type":"uint256"}]},
 ] as const;
 
 /** GoatV4Steward: keeper-only entry points. Never sent; listed so the decode check can refuse them. */
 export const stewardRefusedAbi = [
   {"type":"function","name":"runSwap","inputs":[{"name":"tokenId","type":"uint256"},{"name":"deadline","type":"uint256"},{"name":"execFee","type":"uint24"},{"name":"execTickSpacing","type":"int24"},{"name":"execHooks","type":"address"},{"name":"signedZfo","type":"uint24"},{"name":"signedOfz","type":"uint24"}],"outputs":[],"stateMutability":"nonpayable"},
   {"type":"function","name":"runWithPermit","inputs":[{"name":"tokenId","type":"uint256"},{"name":"deadline","type":"uint256"},{"name":"permit","type":"tuple","components":[{"name":"deadline","type":"uint256"},{"name":"nonce","type":"uint256"},{"name":"signature","type":"bytes"}]}],"outputs":[],"stateMutability":"nonpayable"},
+  {"type":"function","name":"runSwapPiece","inputs":[{"name":"tokenId","type":"uint256"},{"name":"deadline","type":"uint256"},{"name":"liquidity","type":"uint128"},{"name":"execFee","type":"uint24"},{"name":"execTickSpacing","type":"int24"},{"name":"execHooks","type":"address"},{"name":"signedZfo","type":"uint24"},{"name":"signedOfz","type":"uint24"}],"outputs":[],"stateMutability":"nonpayable"},
 ] as const;
 
 /** GoatV4PairRegistry: read functions, errors. */
@@ -283,6 +291,10 @@ export const autoRangeAbi = [
   {"type":"error","name":"WrongChain","inputs":[]},
   {"type":"error","name":"WrongContract","inputs":[]},
   {"type":"error","name":"ZeroAddress","inputs":[]},
+  {"type":"function","name":"configTokens","inputs":[{"name":"tokenIds","type":"uint256[]"},{"name":"vault","type":"address"},{"name":"config","type":"tuple","components":[{"name":"lowerTickLimit","type":"int32"},{"name":"upperTickLimit","type":"int32"},{"name":"lowerTickDelta","type":"int32"},{"name":"upperTickDelta","type":"int32"},{"name":"token0SlippageX64","type":"uint64"},{"name":"token1SlippageX64","type":"uint64"},{"name":"onlyFees","type":"bool"},{"name":"autoCompound","type":"bool"},{"name":"maxRewardX64","type":"uint64"}]}],"outputs":[],"stateMutability":"nonpayable"},
+  {"type":"function","name":"pieceDest","inputs":[{"name":"","type":"uint256"}],"outputs":[{"name":"","type":"uint256"}],"stateMutability":"view"},
+  {"type":"function","name":"ruleOf","inputs":[{"name":"tokenId","type":"uint256"}],"outputs":[{"name":"config","type":"tuple","components":[{"name":"lowerTickLimit","type":"int32"},{"name":"upperTickLimit","type":"int32"},{"name":"lowerTickDelta","type":"int32"},{"name":"upperTickDelta","type":"int32"},{"name":"token0SlippageX64","type":"uint64"},{"name":"token1SlippageX64","type":"uint64"},{"name":"onlyFees","type":"bool"},{"name":"autoCompound","type":"bool"},{"name":"maxRewardX64","type":"uint64"}]},{"name":"writer","type":"address"},{"name":"holder","type":"address"},{"name":"allowed","type":"bool"},{"name":"liquidity","type":"uint128"}],"stateMutability":"view"},
+  {"type":"error","name":"AllPositionsApprovalRequired","inputs":[]},
 ] as const;
 
 /** AutoRange: keeper-only entry points. Never sent; listed so the decode check can refuse them. */
@@ -291,6 +303,7 @@ export const autoRangeRefusedAbi = [
   {"type":"function","name":"autoCompoundWithVault","inputs":[{"name":"","type":"tuple","components":[{"name":"tokenId","type":"uint256"},{"name":"swap0To1","type":"bool"},{"name":"amountIn","type":"uint256"},{"name":"deadline","type":"uint256"}]},{"name":"","type":"address"}],"outputs":[],"stateMutability":"nonpayable"},
   {"type":"function","name":"execute","inputs":[{"name":"params","type":"tuple","components":[{"name":"tokenId","type":"uint256"},{"name":"swap0To1","type":"bool"},{"name":"amountIn","type":"uint256"},{"name":"swapData","type":"bytes"},{"name":"amountRemoveMin0","type":"uint256"},{"name":"amountRemoveMin1","type":"uint256"},{"name":"amountAddMin0","type":"uint256"},{"name":"amountAddMin1","type":"uint256"},{"name":"deadline","type":"uint256"},{"name":"rewardX64","type":"uint64"}]}],"outputs":[],"stateMutability":"nonpayable"},
   {"type":"function","name":"executeWithVault","inputs":[{"name":"","type":"tuple","components":[{"name":"tokenId","type":"uint256"},{"name":"swap0To1","type":"bool"},{"name":"amountIn","type":"uint256"},{"name":"swapData","type":"bytes"},{"name":"amountRemoveMin0","type":"uint256"},{"name":"amountRemoveMin1","type":"uint256"},{"name":"amountAddMin0","type":"uint256"},{"name":"amountAddMin1","type":"uint256"},{"name":"deadline","type":"uint256"},{"name":"rewardX64","type":"uint64"}]},{"name":"","type":"address"}],"outputs":[],"stateMutability":"nonpayable"},
+  {"type":"function","name":"executePiece","inputs":[{"name":"params","type":"tuple","components":[{"name":"tokenId","type":"uint256"},{"name":"swap0To1","type":"bool"},{"name":"amountIn","type":"uint256"},{"name":"swapData","type":"bytes"},{"name":"amountRemoveMin0","type":"uint256"},{"name":"amountRemoveMin1","type":"uint256"},{"name":"amountAddMin0","type":"uint256"},{"name":"amountAddMin1","type":"uint256"},{"name":"deadline","type":"uint256"},{"name":"rewardX64","type":"uint64"}]},{"name":"liquidity","type":"uint128"}],"outputs":[],"stateMutability":"nonpayable"},
 ] as const;
 
 /** AutoExit (Uniswap v3): owner and read functions, errors. */
@@ -365,11 +378,13 @@ export const autoExitAbi = [
   {"type":"error","name":"WrongChain","inputs":[]},
   {"type":"error","name":"WrongContract","inputs":[]},
   {"type":"error","name":"ZeroAddress","inputs":[]},
+  {"type":"function","name":"ruleOf","inputs":[{"name":"tokenId","type":"uint256"}],"outputs":[{"name":"config","type":"tuple","components":[{"name":"isActive","type":"bool"},{"name":"token0Swap","type":"bool"},{"name":"token1Swap","type":"bool"},{"name":"token0TriggerTick","type":"int24"},{"name":"token1TriggerTick","type":"int24"},{"name":"token0SlippageX64","type":"uint64"},{"name":"token1SlippageX64","type":"uint64"},{"name":"onlyFees","type":"bool"},{"name":"maxRewardX64","type":"uint64"}]},{"name":"writer","type":"address"},{"name":"holder","type":"address"},{"name":"allowed","type":"bool"},{"name":"liquidity","type":"uint128"}],"stateMutability":"view"},
 ] as const;
 
 /** AutoExit: keeper-only entry points. Never sent; listed so the decode check can refuse them. */
 export const autoExitRefusedAbi = [
   {"type":"function","name":"execute","inputs":[{"name":"params","type":"tuple","components":[{"name":"tokenId","type":"uint256"},{"name":"swapData","type":"bytes"},{"name":"amountRemoveMin0","type":"uint256"},{"name":"amountRemoveMin1","type":"uint256"},{"name":"deadline","type":"uint256"},{"name":"rewardX64","type":"uint64"}]}],"outputs":[],"stateMutability":"nonpayable"},
+  {"type":"function","name":"executePiece","inputs":[{"name":"params","type":"tuple","components":[{"name":"tokenId","type":"uint256"},{"name":"swapData","type":"bytes"},{"name":"amountRemoveMin0","type":"uint256"},{"name":"amountRemoveMin1","type":"uint256"},{"name":"deadline","type":"uint256"},{"name":"rewardX64","type":"uint64"}]},{"name":"liquidity","type":"uint128"}],"outputs":[],"stateMutability":"nonpayable"},
 ] as const;
 
 /** GoatPairTable: read functions, errors. */

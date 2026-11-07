@@ -62,15 +62,23 @@ test('pinned-code: a contract whose live code does not match its pin is never us
   assert.equal(rule(run(s[1].to, s[1].data, { ...RCTX, gates: bad, intent: 'stop', currentApproved: GOAT_V4_STEWARD_ENGINE })), 'pinned-code');
 });
 
-test('function: setApprovalForAll, permitForAll, transfers, keeper-only entry points, an unknown selector', () => {
-  assert.equal(rule(run(POSM, enc(nftRefusedAbi, 'setApprovalForAll', [GOAT_V4_STEWARD_ENGINE, true]), RCTX)), 'function');
+test('function and all-positions: setApprovalForAll outside the auto-range allow step, permitForAll, transfers, keeper-only entry points, an unknown selector', () => {
+  assert.equal(rule(run(POSM, enc(posmAbi, 'setApprovalForAll', [GOAT_V4_STEWARD_ENGINE, true]), RCTX)), 'all-positions', 'a turn-on step is not the allow step');
+  assert.equal(rule(run(POSM, enc(posmAbi, 'setApprovalForAll', [GOAT_V4_STEWARD_ENGINE, true]), { ...RCTX, intent: 'allow' })), 'ok', 'the r4 auto-range allow step');
+  assert.equal(rule(run(POSM, enc(posmAbi, 'setApprovalForAll', [GOAT_V4_STEWARD_ENGINE, true]), { ...RCTX, intent: 'allow', rangeOpen: false })), 'all-positions', 'closed until the port is reviewed');
+  assert.equal(rule(run(POSM, enc(posmAbi, 'setApprovalForAll', [GOAT_V4_STEWARD_ENGINE, true]), { ...ctx('exit', 'v4'), intent: 'allow' })), 'all-positions', 'never for auto-exit');
+  assert.equal(rule(run(POSM, enc(posmAbi, 'setApprovalForAll', [OTHER, true]), { ...RCTX, intent: 'allow' })), 'all-positions', 'to another contract');
+  assert.equal(rule(run(POSM, enc(posmAbi, 'setApprovalForAll', [OTHER, false]), { ...RCTX, intent: 'stop' })), 'all-positions', "another app's permission is left alone");
+  assert.equal(rule(run(POSM, enc(posmAbi, 'setApprovalForAll', [GOAT_V4_STEWARD_ENGINE, false]), { ...RCTX, intent: 'stop' })), 'ok');
   assert.equal(rule(run(POSM, enc(nftRefusedAbi, 'permitForAll', [ACCOUNT, GOAT_V4_STEWARD_ENGINE, true, 1n, 1n, '0x']), RCTX)), 'function');
   assert.equal(rule(run(POSM, enc(nftRefusedAbi, 'transferFrom', [ACCOUNT, OTHER, P4.id]), RCTX)), 'function');
   assert.equal(rule(run(POSM, enc(posmAbi, 'permit', [GOAT_AUTO_COMPOUND_V4, P4.id, 1n, 1n, '0x']), RCTX)), 'function');
   assert.equal(rule(run(GOAT_V4_STEWARD, enc(stewardRefusedAbi, 'runWithPermit', [P4.id, 1n, { deadline: 1n, nonce: 1n, signature: '0x' }]), RCTX)), 'function');
   assert.equal(rule(run(GOAT_AUTO_COMPOUND_V4, enc(gac4RefusedAbi, 'execute', [{ tokenId: P4.id, deadline: 1n, permitDeadline: 1n, nonce: 1n, signature: '0x' }]), ctx('compound', 'v4'))), 'function');
   assert.equal(rule(run(RANGE.to, '0xdeadbeef', RCTX)), 'function');
-  assert.equal(rule(run(NPM, enc(nftRefusedAbi, 'setApprovalForAll', [AUTO_RANGE_V3, true]), ctx('range', 'v3'))), 'function');
+  assert.equal(rule(run(NPM, enc(posmAbi, 'setApprovalForAll', [AUTO_RANGE_V3, true]), ctx('range', 'v3'))), 'all-positions');
+  assert.equal(rule(run(NPM, enc(posmAbi, 'setApprovalForAll', [AUTO_RANGE_V3, true]), { ...ctx('range', 'v3'), intent: 'allow' })), 'ok');
+  assert.equal(rule(run(NPM, enc(posmAbi, 'setApprovalForAll', [AUTO_EXIT_V3, true]), { ...ctx('exit', 'v3'), intent: 'allow' })), 'all-positions');
 });
 
 test('position: another position, the signer not the owner on chain (or not read), a different automation', () => {
@@ -95,7 +103,7 @@ test('multicall: multicall with a nonce outside the session or the window, a for
   assert.equal(rule(run(POSM, mc([enc(posmAbi, 'revokeNonce', [allowed[0]])]), base)), 'ok');
   assert.equal(rule(run(POSM, mc([enc(posmAbi, 'revokeNonce', [(9n << 8n) | 3n])]), base)), 'multicall');
   assert.equal(rule(run(POSM, mc([enc(posmAbi, 'revokeNonce', [7n << 8n])]), { ...base, revokeAllowed: [7n << 8n] })), 'multicall', 'an allowed nonce outside the window is still refused');
-  assert.equal(rule(run(POSM, mc([enc(nftRefusedAbi, 'setApprovalForAll', [OTHER, true])]), base)), 'multicall');
+  assert.equal(rule(run(POSM, mc([enc(posmAbi, 'setApprovalForAll', [OTHER, true])]), base)), 'multicall');
   assert.equal(rule(run(POSM, mc([enc(posmAbi, 'approve', ['0x0000000000000000000000000000000000000000', P4.id + 1n])]), base)), 'multicall');
   assert.equal(rule(run(POSM, mc([enc(posmAbi, 'approve', [OTHER, P4.id])]), base)), 'multicall');
   assert.equal(rule(run(POSM, mc([enc(posmAbi, 'approve', ['0x0000000000000000000000000000000000000000', P4.id])]), { ...base, currentApproved: FOREIGN_APP })), 'multicall');
@@ -116,9 +124,11 @@ test('rule-values: values changed after building fail the re-check', () => {
   assert.equal(rule(run(AUTO_RANGE_V3, vault, ctx('range', 'v3'))), 'rule-values', 'the vault must be zero');
 });
 
-test('rule-limits: the permission for all positions, more than 20 moves, exit flag 16, fee-only modes, a fee above the live fee', () => {
-  assert.equal(rule(run(RANGE.to, enc(stewardAbi, 'setRangeConfig', [P4.id, { ...rangeArgs, standing: true }]), RCTX)), 'rule-limits');
-  assert.equal(rule(run(RANGE.to, enc(stewardAbi, 'setRangeConfig', [P4.id, { ...rangeArgs, budget: 21 }]), RCTX)), 'rule-limits');
+test('rule-limits: a range rule that is not standing, a move limit of 0 or 21-254, exit flag 16, fee-only modes, a fee above the live fee', () => {
+  assert.equal(rule(run(RANGE.to, enc(stewardAbi, 'setRangeConfig', [P4.id, { ...rangeArgs, standing: false }]), RCTX)), 'rule-limits');
+  for (const budget of [0, 21, 100, 254]) assert.equal(rule(run(RANGE.to, enc(stewardAbi, 'setRangeConfig', [P4.id, { ...rangeArgs, budget }]), RCTX)), 'rule-limits', `budget ${budget}`);
+  for (const budget of [1, 20, 255]) assert.equal(rule(run(RANGE.to, enc(stewardAbi, 'setRangeConfig', [P4.id, { ...rangeArgs, budget }]), RCTX)), 'ok', `budget ${budget}`);
+  assert.equal(rule(run(RANGE.to, RANGE.data, { ...RCTX, rangeOpen: false })), 'rule-limits', 'auto-range closed until reviewed');
   const ex = okv(setExit({ tokenId: P4.id, draft: { kind: 'exit', venue: 'v4', lower: { on: true, tick: P4.tickLower - 500, swap: false }, upper: { on: false, tick: 0, swap: false }, slippageBps: 50, maxSwapFeePips: 0 }, steward: GOAT_V4_STEWARD, pool: pool4, tickLower: P4.tickLower, tickUpper: P4.tickUpper, swapAllowed: true }));
   const exArgs = ex.args[1] as Record<string, unknown>;
   assert.equal(rule(run(ex.to, ex.data, ctx('exit', 'v4'))), 'ok');
