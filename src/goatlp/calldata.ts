@@ -1,8 +1,12 @@
 // Transaction builders of the automation tools. Each returns an AutoCall (exact encoded bytes, value 0) or the list of
 // problems with the inputs; nothing is ever clamped. The decode check (./guard.ts) re-checks the final bytes.
-//  - Permissions: only approve(spender, tokenId) on the venue's position manager, for one position. Never a permission
-//    for all positions, never permitForAll.
+//  - Permissions: approve(spender, tokenId) on the venue's position manager, for one position; auto-range on the r4
+//    contracts needs the permission for all positions (setApprovalForAll(AutoRange or the Steward's engine, true)), given
+//    first, as the contract refuses the rule without it. Never permitForAll. Removing a permission for all positions
+//    (setApprovalForAll(spender, false)) is a stop step only.
 //  - Turn on: [allow (skipped when already allowed to the right spender), turn on]; v4 auto-compound: [sign N, turn on].
+//  - A rule that moves in pieces lives on several positions (the old one and the one the pieces go to): its stop and its
+//    change are one transaction over all of them (v4 clearConfigs / setRangeConfigs, v3 configTokens).
 //  - Stop: v3 = [rule off, approve(0) if this automation holds the permission];
 //          v4 auto-range / auto-exit = [clearConfig, multicall(approve(0)) if the engine holds the permission];
 //          v4 auto-compound = [rule off, multicall(revokeNonce for every signed and unused message, approve(0) if held)].
@@ -162,9 +166,9 @@ export function v3ExitDisable(x: { tokenId: bigint; autoExit: Address }): AutoCa
 
 // ------------------------------------------------------------------ v4 Steward
 
-/** The v4 auto-range rule: 20 moves, this position only. */
+/** The v4 auto-range rule on r4: no move limit (255), standing (it keeps running after each move). */
 export function rangeParams(d: RangeV4Draft): RangeParamsIn {
-  return { triggerTicks: d.triggerTicks, slippageBps: d.slippageBps, minInterval: d.minInterval, budget: STEWARD_BUDGET, standing: false, maxSwapFeePips: d.maxSwapFeePips };
+  return { triggerTicks: d.triggerTicks, slippageBps: d.slippageBps, minInterval: d.minInterval, budget: STEWARD_BUDGET, standing: true, maxSwapFeePips: d.maxSwapFeePips };
 }
 
 export function exitParams(d: ExitV4Draft): ExitParamsIn {
@@ -195,6 +199,46 @@ export function setExit(x: { tokenId: bigint; draft: ExitV4Draft; steward: Addre
   return ok(mkCall({ kind: 'config', label: x.change ? STEP.save : STEP.turnOn, to: x.steward, abi: stewardAbi, functionName: 'setExitConfig', args: [x.tokenId, p], contract: 'rangeExitV4', tokenId: x.tokenId }));
 }
 
+/** One v4 change over every position of a moving rule (r4 only) */
+export function setRangeMany(x: { tokenIds: readonly bigint[]; draft: RangeV4Draft; steward: Address; pool: PoolCtx; widthTicks: number }): BuildResult<AutoCall> {
+  const p = rangeParams(x.draft);
+  const e = validateRangeV4(p, { ...x.pool, widthTicks: x.widthTicks });
+  if (e.length) return fail(e);
+  return ok(mkCall({ kind: 'config', label: STEP.save, to: x.steward, abi: stewardAbi, functionName: 'setRangeConfigs', args: [[...x.tokenIds], p], contract: 'rangeExitV4', tokenId: x.tokenIds[0] }));
+}
+
+/** One v4 stop over every position of a moving rule (r4 only; skips an id with no rule) */
+export function clearRules(x: { tokenIds: readonly bigint[]; steward: Address }): AutoCall {
+  return mkCall({ kind: 'clear', label: 'Clear the rule on every position of the move', to: x.steward, abi: stewardAbi, functionName: 'clearConfigs', args: [[...x.tokenIds]], contract: 'rangeExitV4', tokenId: x.tokenIds[0] });
+}
+
+/** One v3 stop over every position of a moving rule (r4 only; skips an id with no rule) */
+export function v3RangeDisableMany(x: { tokenIds: readonly bigint[]; autoRange: Address }): AutoCall {
+  return mkCall({ kind: 'disable', label: 'Turn off auto-range on every position of the move', to: x.autoRange, abi: autoRangeAbi, functionName: 'configTokens', args: [[...x.tokenIds], ZERO_ADDRESS, AR_OFF], contract: 'rangeExitV3', tokenId: x.tokenIds[0] });
+}
+
+/** One v3 change over every position of a moving rule (r4 only) */
+export function v3RangeEnableMany(x: { tokenIds: readonly bigint[]; draft: RangeV3Draft; autoRange: Address; gate: number; tickSpacing: number; rangeFeeX64: bigint }): BuildResult<AutoCall> {
+  const c = arCfg(x.draft, x.rangeFeeX64);
+  const e = validateAr(c, { gate: x.gate, tickSpacing: x.tickSpacing, rangeFeeX64: x.rangeFeeX64 });
+  if (e.length) return fail(e);
+  return ok(mkCall({ kind: 'config', label: STEP.save, to: x.autoRange, abi: autoRangeAbi, functionName: 'configTokens', args: [[...x.tokenIds], ZERO_ADDRESS, c], contract: 'rangeExitV3', tokenId: x.tokenIds[0] }));
+}
+
+/** "Allow all positions" for auto-range on r4: setApprovalForAll(AutoRange or the Steward's engine, true) */
+export function allowAllPositions(x: { venue: Venue; tokenId: bigint; spenders: Spenders }): BuildResult<AutoCall> {
+  const spender = spenderFor('range', x.venue, x.spenders);
+  if (!spender) return fail(['No Goat LP spender for auto-range.']);
+  const n = nft(x.venue);
+  return ok(mkCall({ kind: 'approve', label: STEP.allowAll, to: n.to, abi: n.abi, functionName: 'setApprovalForAll', args: [spender, true], contract: n.contract, tokenId: x.tokenId }));
+}
+
+/** Remove a permission for all positions: setApprovalForAll(spender, false) (a stop step) */
+export function removeAllPositions(x: { venue: Venue; tokenId: bigint; operator: Address }): AutoCall {
+  const n = nft(x.venue);
+  return mkCall({ kind: 'remove-permission', label: 'Remove the permission for all positions', to: n.to, abi: n.abi, functionName: 'setApprovalForAll', args: [x.operator, false], contract: n.contract, tokenId: x.tokenId });
+}
+
 export function clearRule(x: { tokenId: bigint; steward: Address }): AutoCall {
   return mkCall({ kind: 'clear', label: 'Clear the rule', to: x.steward, abi: stewardAbi, functionName: 'clearConfig', args: [x.tokenId], contract: 'rangeExitV4', tokenId: x.tokenId });
 }
@@ -217,6 +261,10 @@ export interface StopFacts {
   revokeNonces?: readonly bigint[];
   /** skip the rule-off step when the rule is already off (only the permission is left) */
   ruleOn?: boolean;
+  /** r4 auto-range: every position of the rule (the id first); more than one = one batch stop */
+  tokenIds?: readonly bigint[];
+  /** remove a permission for all positions held by this spender (a stop of the earlier contracts) */
+  removeForAll?: Address | null;
 }
 
 /** The permission-removal step of a stop, or null when there is nothing to remove. */
@@ -243,12 +291,16 @@ export function stopPlan(kind: Kind, venue: Venue, f: StopFacts): BuildResult<Au
   const to = f.targets[contractFor(kind, venue)];
   if (f.ruleOn !== false) {
     if (!to) return fail(['The automation contract is not known.']);
+    const many = kind === 'range' && (f.tokenIds?.length ?? 0) > 1 ? f.tokenIds! : null;
+    if (many && many[0] !== f.tokenId) return fail(['The list of the rule\'s positions must start with this position.']);
     if (kind === 'compound') out.push(venue === 'v4' ? v4CompoundDisable({ tokenId: f.tokenId, gac4: to }) : v3CompoundDisable({ tokenId: f.tokenId, gac3: to }));
-    else if (venue === 'v4') out.push(clearRule({ tokenId: f.tokenId, steward: to }));
-    else out.push(kind === 'range' ? v3RangeDisable({ tokenId: f.tokenId, autoRange: to }) : v3ExitDisable({ tokenId: f.tokenId, autoExit: to }));
+    else if (venue === 'v4') out.push(many ? clearRules({ tokenIds: many, steward: to }) : clearRule({ tokenId: f.tokenId, steward: to }));
+    else if (kind === 'range') out.push(many ? v3RangeDisableMany({ tokenIds: many, autoRange: to }) : v3RangeDisable({ tokenId: f.tokenId, autoRange: to }));
+    else out.push(v3ExitDisable({ tokenId: f.tokenId, autoExit: to }));
   }
   const r = revokeCall(kind, venue, f);
   if (r) out.push(r);
+  if (f.removeForAll) out.push(removeAllPositions({ venue, tokenId: f.tokenId, operator: f.removeForAll }));
   return ok(out);
 }
 
@@ -259,12 +311,29 @@ export function stopPlan(kind: Kind, venue: Venue, f: StopFacts): BuildResult<Au
 export function turnOnSteps(x: {
   kind: Kind; venue: Venue; tokenId: bigint; spenders: Spenders; approved: Address | null; turnOn: AutoCall; change?: boolean;
   sign?: { count: number; deadline: bigint };
+  /** auto-range: isApprovedForAll(owner, spender) now (r4 auto-range needs it, and it is given first) */
+  forAll?: boolean;
 }): BuildResult<AutoStep[]> {
-  if (x.change) return ok([{ key: 'save', label: STEP.save, calls: [{ ...x.turnOn, label: STEP.save }] }]);
+  if (x.change) {
+    // r4 auto-range refuses a saved rule without the permission for all positions, so a change gives it back first
+    if (x.kind === 'range' && x.forAll === false) {
+      const a = allowAllPositions({ venue: x.venue, tokenId: x.tokenId, spenders: x.spenders });
+      if (!a.ok) return a;
+      return ok([{ key: 'allow', label: a.value.label, calls: [a.value] }, { key: 'save', label: STEP.save, calls: [{ ...x.turnOn, label: STEP.save }] }]);
+    }
+    return ok([{ key: 'save', label: STEP.save, calls: [{ ...x.turnOn, label: STEP.save }] }]);
+  }
   const steps: AutoStep[] = [];
   if (x.kind === 'compound' && x.venue === 'v4') {
     if (!x.sign) return fail(['Auto-compound on v4 needs the number of runs and the end date of the signed messages.']);
     steps.push({ key: 'sign', label: STEP.sign(x.sign.count), calls: [], sign: x.sign });
+  } else if (x.kind === 'range') {
+    if (x.forAll === undefined) return fail(['The permission for all positions was not read.']);
+    if (!x.forAll) {
+      const a = allowAllPositions({ venue: x.venue, tokenId: x.tokenId, spenders: x.spenders });
+      if (!a.ok) return a;
+      steps.push({ key: 'allow', label: a.value.label, calls: [a.value] });
+    }
   } else {
     const spender = spenderFor(x.kind, x.venue, x.spenders);
     if (!spender) return fail(['No Goat LP spender for this automation.']);

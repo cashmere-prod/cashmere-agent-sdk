@@ -5,6 +5,13 @@ import type { Kind, Venue } from './types';
 export const KIND_NAME: Readonly<Record<Kind, string>> = { compound: 'Auto-compound', range: 'Auto-range', exit: 'Auto-exit' };
 export const VENUE_NAME: Readonly<Record<Venue, string>> = { v3: 'Uniswap v3', v4: 'Uniswap v4' };
 
+/** Why no rule is turned on while the r4 values of this build are placeholders (one plain line; no time is promised) */
+export const R4_CLOSED = 'This build does not carry the addresses of the new Goat LP contracts yet, so it turns no rule on. Reads and stops work.';
+/** Why the agent tools do not turn auto-range on (stops always work) */
+export const RANGE_PORT_CLOSED = 'Auto-range is not offered by the agent tools yet. Your position stays as it is. Auto-exit and auto-compound work here, and auto-range works in the Goat LP app.';
+/** A rule saved on the earlier contracts */
+export const EARLIER_RULE = 'Saved on the earlier Goat LP contracts, which no longer run rules. Stop it with goatlp_stop_automation; turning the rule on again saves it on the new contracts.';
+
 export const PAUSED_LINE = 'Paused right now. The keeper tries again later.';
 export const PAUSED_ALL_LINE = 'Paused for everyone right now. Your position is not affected; withdraw and collect still work. The keeper tries again later.';
 
@@ -93,6 +100,8 @@ export const INVALID = {
 /** Step labels of a plan */
 export const STEP = {
   allow: 'Allow this position',
+  allowAll: 'Allow auto-range on your positions of this venue (it acts only where auto-range is on)',
+  stopEarlier: 'Stop the rule on the earlier contracts',
   sign: (n: number) => `Sign ${n} runs (free, no gas)`,
   turnOn: 'Turn on',
   save: 'Save changes',

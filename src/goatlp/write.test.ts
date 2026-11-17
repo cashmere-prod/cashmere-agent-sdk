@@ -88,13 +88,13 @@ test('v4 auto-range: the plan sends nothing; execute with its planId sends exact
   assert.match(String(plan.planId), /^[0-9a-f]{24}$/);
   assert.equal(s.signer.sent.length, 0, 'a plan sends nothing');
   const steps = plan.steps as Record<string, unknown>[];
-  assert.deepEqual(steps.map((x) => x.action), ['Allow this position', 'Turn on']);
+  assert.deepEqual(steps.map((x) => x.action), ['Allow auto-range on your positions of this venue (it acts only where auto-range is on)', 'Turn on']);
   assert.equal(steps[0].contract, 'Uniswap v4 PositionManager');
-  assert.match(String(steps[0].call), /^approve\("GoatV4StewardEngine 0xD12D46c9d3B1FE463895A20daD19F3cae5584892", "4006316"\)$/);
+  assert.equal(String(steps[0].call), `setApprovalForAll("GoatV4StewardEngine ${GOAT_V4_STEWARD_ENGINE}", true)`);
   assert.equal(steps[1].contract, 'GoatV4Steward');
   assert.match(String(steps[0].simulation), /^ok/);
   const rule = plan.rule as Record<string, unknown>;
-  assert.equal(rule.movesAllowed, 20);
+  assert.equal(rule.movesAllowed, 'No move limit: it keeps running until you turn it off.');
   assert.equal(rule.maxPriceProtection, '0.25%', "the pool's hook entry caps price protection at 0.40%: the app's default under it");
   assert.equal(rule.atMostOneMoveEvery, '6 hours');
   assert.match(String(plan.fee), /^0\.15% of the amount moved, per move\.$/);
@@ -106,11 +106,12 @@ test('v4 auto-range: the plan sends nothing; execute with its planId sends exact
   assert.equal(s.signer.sent.length, 2);
   const [a, b] = s.signer.sent;
   assert.equal(a.to, POSM);
-  assert.deepEqual(fn(posmAbi, a.data).args, [GOAT_V4_STEWARD_ENGINE, V4_POS]);
+  assert.equal(fn(posmAbi, a.data).functionName, 'setApprovalForAll');
+  assert.deepEqual(fn(posmAbi, a.data).args, [GOAT_V4_STEWARD_ENGINE, true]);
   assert.equal(b.to, GOAT_V4_STEWARD);
   const p = fn(stewardAbi, b.data);
   assert.equal(p.functionName, 'setRangeConfig');
-  assert.deepEqual(p.args[1], { triggerTicks: 102, slippageBps: 25, minInterval: 21600, budget: 20, standing: false, maxSwapFeePips: 10000 });
+  assert.deepEqual(p.args[1], { triggerTicks: 102, slippageBps: 25, minInterval: 21600, budget: 255, standing: true, maxSwapFeePips: 10000 });
   assert.ok(s.signer.sent.every((t) => t.value === 0n));
   assert.equal(((done.now as Record<string, Record<string, unknown>>).rule).on, true);
   assert.ok((done.steps as { txHash?: string; explorer?: string }[]).every((x) => x.txHash && x.explorer?.startsWith('https://robin.etherscan.io/tx/')));
@@ -137,7 +138,7 @@ test('execute needs the planId of a plan made with the same inputs, within 10 mi
   assert.match(String((await call(client, 'goatlp_set_auto_range', { ...args, execute: true, planId: p2.planId })).error), /expired/);
   // the chain changed between the plan and the execute: the plan is not the same any more
   const p3 = await call(client, 'goatlp_set_auto_range', args);
-  s.st.approved.set(`v4:${V4_POS}`, GOAT_V4_STEWARD_ENGINE);
+  s.st.forAll.add(`v4:${TEST_ACCOUNT.toLowerCase()}:${GOAT_V4_STEWARD_ENGINE.toLowerCase()}`);
   assert.match(String((await call(client, 'goatlp_set_auto_range', { ...args, execute: true, planId: p3.planId })).error), /no longer the same/);
   assert.equal(s.signer.sent.length, 0);
   await client.close();
@@ -154,7 +155,7 @@ test('guards: chain id, pinned code (before the plan and right before sending), 
   const s2 = setup();
   s2.chain.codeHashes.set(GOAT_V4_STEWARD.toLowerCase(), `0x${'12'.repeat(32)}` as Hex);
   client = await connect(s2.options);
-  assert.match(String((await call(client, 'goatlp_set_auto_range', args)).error), /GoatV4Steward at 0xBb64.* does not match the build pinned in this package/);
+  assert.match(String((await call(client, 'goatlp_set_auto_range', args)).error), new RegExp(`GoatV4Steward at ${GOAT_V4_STEWARD}.* does not match the build pinned in this package`));
   await client.close();
 
   const s3 = setup();
@@ -178,7 +179,7 @@ test('guards: a simulation revert refuses the plan; one right before a later ste
   const s = setup();
   s.chain.simulate = () => { throw Object.assign(new Error('execution reverted'), { data: encodeErrorResult({ abi: stewardAbi as Abi, errorName: 'PoolNotAllowed' }) }); };
   let client = await connect(s.options);
-  assert.match(String((await call(client, 'goatlp_set_auto_range', args)).error), /step 1 \(Allow this position\) would revert: Automation is not offered for this pool\. \(PoolNotAllowed\)/);
+  assert.match(String((await call(client, 'goatlp_set_auto_range', args)).error), /step 1 \(Allow auto-range on your positions of this venue \(it acts only where auto-range is on\)\) would revert: Automation is not offered for this pool\. \(PoolNotAllowed\)/);
   await client.close();
 
   const s2 = setup();
@@ -186,7 +187,7 @@ test('guards: a simulation revert refuses the plan; one right before a later ste
   const plan = await call(client, 'goatlp_set_auto_range', args);
   s2.chain.simulate = (tx) => { if (tx.to === GOAT_V4_STEWARD) throw Object.assign(new Error('execution reverted'), { data: encodeErrorResult({ abi: stewardAbi as Abi, errorName: 'ModePaused' }) }); return '0x'; };
   const r = await call(client, 'goatlp_set_auto_range', { ...args, execute: true, planId: plan.planId });
-  assert.match(String(r.error), /^Not sent: step 2 \(Turn on\) would revert: Paused for everyone right now\..* Done before it: step 1 \(Allow this position\) 0x[0-9a-f]{64}\./);
+  assert.match(String(r.error), /^Not sent: step 2 \(Turn on\) would revert: Paused for everyone right now\..* Done before it: step 1 \(Allow auto-range on your positions of this venue \(it acts only where auto-range is on\)\) 0x[0-9a-f]{64}\./);
   assert.equal(s2.signer.sent.length, 1);
   await client.close();
 });
@@ -339,7 +340,7 @@ test('stop: v4 auto-range clears the rule and removes the engine permission; v4 
   assert.equal(fn(stewardAbi, s.signer.sent[0].data).functionName, 'clearConfig');
   const inner = (fn(posmAbi, s.signer.sent[1].data).args[0] as Hex[]).map((d) => fn(posmAbi, d));
   assert.deepEqual(inner.map((x) => [x.functionName, ...x.args]), [['approve', ZERO, V4_POS]]);
-  assert.deepEqual(done.now, { ruleOn: false, permission: 'none' });
+  assert.deepEqual(done.now, { ruleOn: false, earlierRuleOn: false, permission: 'none' });
 
   // auto-compound with a session the store knows: bits 0..5 signed, 0 and 1 used by runs
   const word = permitWord(GOAT_AUTO_COMPOUND_V4, V4_POS);
@@ -484,7 +485,7 @@ test('stop: an approval for all positions to the automation is reported as still
   s.st.forAll.add(`v4:${TEST_ACCOUNT.toLowerCase()}:${GOAT_V4_STEWARD_ENGINE.toLowerCase()}`);
   const client = await connect(s.options);
   const plan = await call(client, 'goatlp_stop_automation', { venue: 'v4', id: String(V4_POS), kind: 'exit' });
-  assert.match(String(plan.allowForAll), /^An approval for all positions to GoatV4StewardEngine \(0xD12D46c9d3B1FE463895A20daD19F3cae5584892\) is still on\. This tool never changes it; it can be removed in the Goat LP app\.$/);
+  assert.equal(String(plan.allowForAll), `An approval for all positions to GoatV4StewardEngine (${GOAT_V4_STEWARD_ENGINE}) is still on. This tool never changes it; it can be removed in the Goat LP app.`);
   await call(client, 'goatlp_stop_automation', { venue: 'v4', id: String(V4_POS), kind: 'exit', execute: true, planId: plan.planId });
   assert.ok(s.signer.sent.length >= 1);
   assert.ok(s.signer.sent.every((t) => !NEVER.includes(t.data.slice(0, 10) as Hex)), 'setApprovalForAll is never sent');

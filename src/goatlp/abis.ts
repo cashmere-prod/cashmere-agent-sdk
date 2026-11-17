@@ -31,6 +31,7 @@ export const posmAbi = [
   { type: 'function', name: 'approve', stateMutability: 'nonpayable', inputs: [{ name: 'spender', type: 'address' }, { name: 'id', type: 'uint256' }], outputs: [] },
   { type: 'function', name: 'getApproved', stateMutability: 'view', inputs: [{ name: 'id', type: 'uint256' }], outputs: [{ name: '', type: 'address' }] },
   { type: 'function', name: 'isApprovedForAll', stateMutability: 'view', inputs: [{ name: 'owner', type: 'address' }, { name: 'operator', type: 'address' }], outputs: [{ name: '', type: 'bool' }] },
+  { type: 'function', name: 'setApprovalForAll', stateMutability: 'nonpayable', inputs: [{ name: 'operator', type: 'address' }, { name: 'approved', type: 'bool' }], outputs: [] },
   { type: 'function', name: 'ownerOf', stateMutability: 'view', inputs: [{ name: 'id', type: 'uint256' }], outputs: [{ name: 'owner', type: 'address' }] },
   { type: 'function', name: 'nonces', stateMutability: 'view', inputs: [{ name: 'owner', type: 'address' }, { name: 'word', type: 'uint256' }], outputs: [{ name: 'bitmap', type: 'uint256' }] },
   { type: 'function', name: 'revokeNonce', stateMutability: 'payable', inputs: [{ name: 'nonce', type: 'uint256' }], outputs: [] },
@@ -51,6 +52,7 @@ export const npmAbi = [
   { type: 'function', name: 'approve', stateMutability: 'nonpayable', inputs: [{ name: 'to', type: 'address' }, { name: 'tokenId', type: 'uint256' }], outputs: [] },
   { type: 'function', name: 'getApproved', stateMutability: 'view', inputs: [{ name: 'tokenId', type: 'uint256' }], outputs: [{ name: '', type: 'address' }] },
   { type: 'function', name: 'isApprovedForAll', stateMutability: 'view', inputs: [{ name: 'owner', type: 'address' }, { name: 'operator', type: 'address' }], outputs: [{ name: '', type: 'bool' }] },
+  { type: 'function', name: 'setApprovalForAll', stateMutability: 'nonpayable', inputs: [{ name: 'operator', type: 'address' }, { name: 'approved', type: 'bool' }], outputs: [] },
   { type: 'function', name: 'ownerOf', stateMutability: 'view', inputs: [{ name: 'tokenId', type: 'uint256' }], outputs: [{ name: 'owner', type: 'address' }] },
   { type: 'function', name: 'positions', stateMutability: 'view', inputs: [{ name: 'tokenId', type: 'uint256' }],
     outputs: [
@@ -76,9 +78,9 @@ export const npmAbi = [
   { type: 'function', name: 'factory', stateMutability: 'view', inputs: [], outputs: [{ name: '', type: 'address' }] },
 ] as const;
 
-/** Refused on both position managers: selectors only, never encoded by a builder */
+/** Refused on both position managers: selectors only, never encoded by a builder (setApprovalForAll is in posmAbi and
+ *  npmAbi: the decode check allows it only for r4 auto-range and to remove a Goat LP permission) */
 export const nftRefusedAbi = [
-  { type: 'function', name: 'setApprovalForAll', stateMutability: 'nonpayable', inputs: [{ name: 'operator', type: 'address' }, { name: 'approved', type: 'bool' }], outputs: [] },
   { type: 'function', name: 'permitForAll', stateMutability: 'payable',
     inputs: [{ name: 'owner', type: 'address' }, { name: 'operator', type: 'address' }, { name: 'approved', type: 'bool' }, { name: 'deadline', type: 'uint256' }, { name: 'nonce', type: 'uint256' }, { name: 'signature', type: 'bytes' }], outputs: [] },
   { type: 'function', name: 'transferFrom', stateMutability: 'payable', inputs: [{ name: 'from', type: 'address' }, { name: 'to', type: 'address' }, { name: 'id', type: 'uint256' }], outputs: [] },

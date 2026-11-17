@@ -6,7 +6,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { createCashmereMcpServer, type CashmereMcpServerOptions } from '../mcp/server';
 import { GoatApi } from './api';
-import { GOAT_V4_STEWARD, GOAT_V4_STEWARD_ENGINE } from './constants';
+import { GOAT_V4_PAIR_REGISTRY, GOAT_V4_STEWARD, GOAT_V4_STEWARD_ENGINE } from './constants';
 import { API_OWNER, ETH_USDG_V4, NOW_SEC, TEST_KEY, V3_POS, V4_POS, apiWorld, goatWorld, v4Info } from './__fixtures__/kit';
 
 async function connect(options: CashmereMcpServerOptions): Promise<Client> {
@@ -115,7 +115,7 @@ test('goatlp_pool: price both ways, ranges with ticks, APR breakdown, the hook r
     autoExit: '0.15%, once, when it closes the position.',
   });
   // the same pool with the registry entry gone: auto-range and auto-exit say why
-  w.chain.on('0x92f449da205552Eadbb51C05888EEDE1657B4048', 'hookEntry', { codehash: `0x${'00'.repeat(32)}`, pinnedFee: 0, maxSlippageBps: 0, kind: 0, requiredBits: 0 });
+  w.chain.on(GOAT_V4_PAIR_REGISTRY, 'hookEntry', { codehash: `0x${'00'.repeat(32)}`, pinnedFee: 0, maxSlippageBps: 0, kind: 0, requiredBits: 0 });
   const r2 = await call(client, 'goatlp_pool', { venue: 'v4', pool: ETH_USDG_V4 });
   assert.deepEqual((r2.automation as Record<string, Record<string, unknown>>).autoRange.why, 'Automation is not offered for this pool.');
   await client.close();

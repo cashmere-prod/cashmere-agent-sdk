@@ -169,8 +169,9 @@ export function registerGoatLpWriteTools(server: McpServer, ctx: GoatLpContext, 
     description: 'Turn on (or change) Goat LP auto-range for one Uniswap v3 or v4 position the configured wallet owns on Robinhood Chain: '
       + "when the price leaves the range by the trigger distance, a keeper moves the position to a new range around the price. The fee is 0.15% "
       + 'of the amount moved, per move. Defaults are the app\'s: the closest trigger the pair allows, 0.5% price protection, on v4 at most one '
-      + 'move every 6 hours and 20 moves per saved rule; on v3 each move makes a new position ID and the new width defaults to the current one. '
-      + `Permission: this position only (v3: AutoRange; v4: GoatV4StewardEngine). One automation per position. ${TWO_STEP}`,
+      + 'move every 6 hours and no move limit (it keeps running until it is turned off); on v3 each move makes a new position ID and the new width defaults to the current one. '
+      + 'Permission: all the wallet\'s positions of the venue, given first (v3: AutoRange; v4: GoatV4StewardEngine); it acts only on positions where auto-range is on. '
+      + `Not offered by this version until its review: it then says so and changes nothing. One automation per position. ${TWO_STEP}`,
     inputSchema: {
       venue, id,
       triggerPct: z.number().positive().max(200).optional().describe('Move when the price is this many percent past the range (default: the closest the pair allows)'),

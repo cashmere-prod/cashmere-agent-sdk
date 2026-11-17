@@ -2,10 +2,16 @@
 // it is signed; a refusal names its rule:
 //  helper-contract  `to` is never one of Revert Finance's helper contracts, and no decoded address argument names one.
 //  chain            chain 4663 (the RPC's chain and the request's).
-//  target           `to` is a pinned Goat LP automation contract or a Uniswap position manager of the right venue.
+//  target           `to` is a pinned Goat LP automation contract (r4, or the earlier r3 contracts for a stop only) or a
+//                   Uniswap position manager of the right venue. The earlier contracts take no new rule.
 //  pinned-code      nothing is sent to an automation whose contracts do not match their pinned code hashes.
-//  function         an allowlist of functions per target: setApprovalForAll, permitForAll, transfers and keeper-only entry
-//                   points are refused.
+//  function         an allowlist of functions per target: permitForAll, transfers and keeper-only entry points are refused;
+//                   setApprovalForAll only as below.
+//  all-positions    setApprovalForAll(op, true) only for auto-range on r4 (op = AutoRange on v3, the Steward's engine on v4),
+//                   as its allow step, while auto-range is open; setApprovalForAll(op, false) only to remove a Goat LP
+//                   spender of either generation.
+//  batch            clearConfigs / configTokens / setRangeConfigs (r4 only) name exactly the planned positions of the rule,
+//                   this position first.
 //  position         the tokenId argument is the planned position, ownerOf(id), read right before, is the signer, and the
 //                   call is for the automation that was planned.
 //  permission       approve(spender, id): spender 0x0 or the Goat LP spender of (kind, venue); approve(0) only over a Goat LP
@@ -13,8 +19,8 @@
 //  multicall        position-manager multicall: only revokeNonce(n) of this position's own signed messages (inside its nonce
 //                   window) and approve(0, id); nothing else.
 //  rule-values      the decoded rule passes the builders' validators again.
-//  rule-limits      no permission for all positions, at most 20 moves, no fee-only modes, an agreed fee no higher than the
-//                   live fee.
+//  rule-limits      v4 auto-range is standing with 1-20 moves or 255 (no limit); no fee-only modes; an agreed fee no higher
+//                   than the live fee; a v4 auto-exit never uses the STANDING flag.
 //  fee-recipient    the fee recipient of the fee-taking contract is the Goat LP treasury before a rule is turned on or allowed.
 //  one-automation   one automation per position: turning on kind K is refused while another kind is on, or while a rule slot
 //                   could not be read.
@@ -28,14 +34,15 @@ import {
   CONTRACT_ABI, CONTRACT_REFUSED_ABI, PERMIT_TYPES, POSM_DOMAIN_NAME, nftRefusedAbi, npmAbi, posmAbi,
 } from './abis';
 import {
-  GOAT_CHAIN_ID, HORIZON_MAX_SEC, MAX_RUNS_PER_SESSION, NPM, POSM, RUN_DEADLINE_SEC, SESSION_WORDS_MAX, ST_FLAG, STEWARD_BUDGET,
+  AUTO_RANGE_OPEN, GOAT_CHAIN_ID, type Gen, HORIZON_MAX_SEC, MAX_RUNS_PER_SESSION, NPM, POSM, RUN_DEADLINE_SEC, SESSION_WORDS_MAX, ST_FLAG,
   V3UTILS, V4UTILS,
 } from './constants';
+import { RANGE_PORT_CLOSED } from './copy';
 import { AE_OFF, AR_OFF, GAC3_OFF, GAC4_OFF, contractFor, isGoatSpender, spenderFor, type Spenders } from './calldata';
 import { permitWord } from './permits';
 import type { ContractGates, ContractKey, Kind, Venue } from './types';
 import {
-  validateAe, validateAr, validateExitV4, validateGac3, validateGac4, validateRangeV4, type AeCfgIn, type ArCfgIn, type ExitParamsIn,
+  validBudget, validateAe, validateAr, validateExitV4, validateGac3, validateGac4, validateRangeV4, type AeCfgIn, type ArCfgIn, type ExitParamsIn,
   type Gac3CfgIn, type Gac4CfgIn, type PoolCtx, type RangeParamsIn,
 } from './validate';
 
@@ -81,6 +88,14 @@ export interface GuardCtx {
   /** when the run simulation last succeeded */
   simulatedOkAtMs?: number;
   nowMs?: number;
+  /** the generation this step is for: 'r3' = a stop on the earlier contracts (default r4) */
+  gen?: Gen;
+  /** the earlier (r3) contracts: a call to one of them may only stop a rule */
+  earlier?: { targets: Partial<Record<ContractKey, Address>>; gates: ContractGates; spenders: Spenders };
+  /** r4 auto-range: every planned position of the rule, this position first (batch calls must name exactly these) */
+  batchIds?: readonly bigint[];
+  /** auto-range may be turned on here (default: the build's own switch, AUTO_RANGE_OPEN) */
+  rangeOpen?: boolean;
 }
 
 export interface AutomationTx { to: Address; data: Hex; value?: bigint; chainId?: number }
@@ -90,17 +105,23 @@ export type AutomationVerdict = { ok: true; call: DecodedAutomationCall } | { ok
 const ALLOWED: Readonly<Record<ContractKey | 'npm' | 'posm', readonly string[]>> = {
   autoCompoundV3: ['configToken'],
   autoCompoundV4: ['configToken'],
-  rangeExitV4: ['setRangeConfig', 'setExitConfig', 'clearConfig', 'run'],
-  rangeExitV3: ['configToken'],
+  rangeExitV4: ['setRangeConfig', 'setExitConfig', 'clearConfig', 'run', 'clearConfigs', 'setRangeConfigs'],
+  rangeExitV3: ['configToken', 'configTokens'],
   exitV3: ['configToken'],
-  npm: ['approve'],
-  posm: ['approve', 'multicall'],
+  npm: ['approve', 'setApprovalForAll'],
+  posm: ['approve', 'multicall', 'setApprovalForAll'],
 };
+/** The earlier contracts: only the calls that stop a rule (each is also checked to turn nothing on) */
+const ALLOWED_EARLIER: Readonly<Record<ContractKey, readonly string[]>> = {
+  autoCompoundV3: ['configToken'], autoCompoundV4: ['configToken'], rangeExitV4: ['clearConfig'], rangeExitV3: ['configToken'], exitV3: ['configToken'],
+};
+const BATCH_FNS = ['clearConfigs', 'configTokens', 'setRangeConfigs'];
 
-function targetOf(to: Address, ctx: GuardCtx): ContractKey | 'npm' | 'posm' | null {
-  if (eq(to, NPM)) return 'npm';
-  if (eq(to, POSM)) return 'posm';
-  for (const [k, a] of Object.entries(ctx.targets) as [ContractKey, Address][]) if (eq(a, to)) return k;
+function targetOf(to: Address, ctx: GuardCtx): { key: ContractKey | 'npm' | 'posm'; earlier: boolean } | null {
+  if (eq(to, NPM)) return { key: 'npm', earlier: false };
+  if (eq(to, POSM)) return { key: 'posm', earlier: false };
+  for (const [k, a] of Object.entries(ctx.targets) as [ContractKey, Address][]) if (!isZero(a) && eq(a, to)) return { key: k, earlier: false };
+  for (const [k, a] of Object.entries(ctx.earlier?.targets ?? {}) as [ContractKey, Address][]) if (!isZero(a) && eq(a, to)) return { key: k, earlier: true };
   return null;
 }
 
@@ -129,6 +150,7 @@ const n = (x: unknown) => Number(x as number | bigint);
 
 function tokenIdArg(fn: string, args: readonly unknown[]): bigint | null {
   if (fn === 'approve') return args[1] as bigint;
+  if (BATCH_FNS.includes(fn)) { const ids = args[0] as readonly bigint[]; return ids.length ? ids[0] : null; }
   if (['configToken', 'setRangeConfig', 'setExitConfig', 'clearConfig', 'run'].includes(fn)) return args[0] as bigint;
   return null;
 }
@@ -153,11 +175,11 @@ function checkConfig(contract: ContractKey, fn: string, args: readonly unknown[]
     return e.length ? no('rule-values', e[0]) : OK;
   }
   if (contract === 'rangeExitV4') {
-    if (fn === 'clearConfig' || fn === 'run') return OK;
-    if (fn === 'setRangeConfig') {
+    if (fn === 'clearConfig' || fn === 'run' || fn === 'clearConfigs') return OK;
+    if (fn === 'setRangeConfig' || fn === 'setRangeConfigs') {
       const p = args[1] as RangeParamsIn;
-      if (p.standing !== false) return no('rule-limits', 'the permission for all positions is never used');
-      if (n(p.budget) > STEWARD_BUDGET) return no('rule-limits', 'more than 20 moves');
+      if (p.standing !== true) return no('rule-limits', 'auto-range on the new contracts must keep running (standing)');
+      if (!validBudget(n(p.budget))) return no('rule-limits', 'the move limit must be 1 to 20, or 255 for none');
       if (!ctx.pool) return no('rule-values', 'the pool facts were not read');
       const e = validateRangeV4({ ...p, triggerTicks: n(p.triggerTicks), slippageBps: n(p.slippageBps), minInterval: n(p.minInterval), budget: n(p.budget), maxSwapFeePips: n(p.maxSwapFeePips) },
         { ...ctx.pool, widthTicks: ctx.pool.tickUpper - ctx.pool.tickLower });
@@ -198,7 +220,7 @@ function checkConfig(contract: ContractKey, fn: string, args: readonly unknown[]
 /** Is this decoded call turning a rule on (rather than off, clearing it or running it)? */
 function turnsOn(contract: ContractKey, fn: string, args: readonly unknown[]): boolean {
   if (contract === 'autoCompoundV3' || contract === 'autoCompoundV4') return !!(args[1] as { enabled: boolean }).enabled;
-  if (contract === 'rangeExitV4') return fn === 'setRangeConfig' || fn === 'setExitConfig';
+  if (contract === 'rangeExitV4') return fn === 'setRangeConfig' || fn === 'setRangeConfigs' || fn === 'setExitConfig';
   if (contract === 'rangeExitV3') { const c = args[2] as ArCfgIn; return c.lowerTickDelta !== c.upperTickDelta; }
   if (contract === 'exitV3') return !!(args[1] as AeCfgIn).isActive;
   return false;
@@ -208,7 +230,7 @@ function kindOfCall(contract: ContractKey, fn: string, fallback: Kind): Kind {
   if (contract === 'autoCompoundV3' || contract === 'autoCompoundV4') return 'compound';
   if (contract === 'rangeExitV3') return 'range';
   if (contract === 'exitV3') return 'exit';
-  if (fn === 'setRangeConfig') return 'range';
+  if (fn === 'setRangeConfig' || fn === 'setRangeConfigs') return 'range';
   if (fn === 'setExitConfig') return 'exit';
   return fallback;
 }
@@ -226,28 +248,57 @@ export function assertAutomationTx(tx: AutomationTx, ctx: GuardCtx): AutomationV
   if ((tx.value ?? 0n) !== 0n) return fail('no-value', 'automation calls never send value');
   if (ctx.chainId !== GOAT_CHAIN_ID || (tx.chainId !== undefined && tx.chainId !== GOAT_CHAIN_ID)) return fail('chain', 'not on Robinhood Chain (4663)');
   const gateKey = contractFor(ctx.kind, ctx.venue);
-  if (!ctx.gates[gateKey]?.ok) return fail('pinned-code', ctx.gates[gateKey]?.reason ?? 'the automation contract was not checked');
-  const target = targetOf(tx.to, ctx);
-  if (!target) return fail('target', 'not a Goat LP automation contract or a Uniswap position manager');
-  if (target !== 'npm' && target !== 'posm' && !ctx.gates[target]?.ok) return fail('target', 'the contract code does not match the pinned build');
+  const planEarlier = ctx.gen === 'r3';
+  const planGates = planEarlier ? ctx.earlier?.gates : ctx.gates;
+  if (!planGates?.[gateKey]?.ok) return fail('pinned-code', planGates?.[gateKey]?.reason ?? 'the automation contract was not checked');
+  const hit = targetOf(tx.to, ctx);
+  if (!hit) return fail('target', 'not a Goat LP automation contract or a Uniswap position manager');
+  const target = hit.key;
+  const isRule = target !== 'npm' && target !== 'posm';
+  if (isRule && hit.earlier !== planEarlier) return fail('target', hit.earlier ? 'the earlier contracts take no new rules' : 'this step is for the earlier contracts');
+  if (isRule && !(hit.earlier ? ctx.earlier?.gates : ctx.gates)?.[target as ContractKey]?.ok) return fail('target', 'the contract code does not match the pinned build');
   const d = decode(target, tx.data);
   if (!d) return fail('function', 'the call could not be decoded');
-  if (d.refused || !ALLOWED[target].includes(d.functionName)) return fail('function', `${d.functionName} is never sent by the Goat LP tools`);
+  const allowedFns = hit.earlier ? ALLOWED_EARLIER[target as ContractKey] : ALLOWED[target];
+  if (d.refused || !allowedFns.includes(d.functionName)) return fail('function', `${d.functionName} is never sent by the Goat LP tools`);
   if (addressesIn(d.args).some((a) => REFUSED_HELPERS.some((h) => eq(h, a)))) return fail('helper-contract', 'an argument names a refused contract');
   if ((target === 'npm' && ctx.venue !== 'v3') || (target === 'posm' && ctx.venue !== 'v4')) return fail('target', 'wrong position manager for this venue');
   if (target !== 'npm' && target !== 'posm') {
     const expect: ContractKey[] = ctx.venue === 'v4' ? ['autoCompoundV4', 'rangeExitV4'] : ['autoCompoundV3', 'rangeExitV3', 'exitV3'];
     if (!expect.includes(target)) return fail('target', 'wrong contract for this venue');
   }
-  if (d.functionName !== 'multicall') {
+  if (d.functionName !== 'multicall' && d.functionName !== 'setApprovalForAll') {
     const id = tokenIdArg(d.functionName, d.args);
     if (id === null || id !== ctx.tokenId) return fail('position', 'the call is for another position');
   }
+  if (BATCH_FNS.includes(d.functionName)) {
+    const ids = (d.args[0] as readonly bigint[]).map(String);
+    const want = (ctx.batchIds ?? []).map(String);
+    if (ids.length !== want.length || ids.some((x, i) => x !== want[i])) return fail('batch', 'the call names other positions than the planned positions of this rule');
+  }
   if (!ctx.ownerOnChain || !eq(ctx.ownerOnChain, ctx.account)) return fail('position', 'the signer does not own this position on chain');
+  const anyGoat = { ...(ctx.earlier?.spenders ?? {}) };
+  const isAnyGoatSpender = (a: Address | null | undefined) => !!isGoatSpender(a ?? null, ctx.spenders) || !!isGoatSpender(a ?? null, anyGoat);
+  if (d.functionName === 'setApprovalForAll') {
+    const op = d.args[0] as Address;
+    if (d.args[1] === false) {
+      if (!isAnyGoatSpender(op)) return fail('all-positions', "only a Goat LP permission for all positions is removed; another app's is left alone");
+    } else {
+      if (ctx.kind !== 'range' || ctx.intent !== 'allow' || planEarlier) return fail('all-positions', 'a permission for all positions is given only as the first step of auto-range');
+      if (!(ctx.rangeOpen ?? AUTO_RANGE_OPEN)) return fail('all-positions', RANGE_PORT_CLOSED);
+      const want = spenderFor('range', ctx.venue, ctx.spenders);
+      if (!want || !eq(want, op)) return fail('all-positions', 'the permission for all positions goes to the wrong contract');
+      if (ctx.treasuryOk?.[gateKey] !== true) return fail('fee-recipient', 'the fee recipient is not the Goat LP treasury');
+      const other = otherActive(ctx, 'range');
+      if (other) return fail('one-automation', other);
+    }
+  }
   if (d.functionName === 'approve') {
     const spender = d.args[0] as Address;
     if (isZero(spender)) {
-      if (!isGoatSpender(ctx.currentApproved ?? null, ctx.spenders)) return fail('permission', "only a Goat LP permission is removed; another app's approval is left alone");
+      if (!isAnyGoatSpender(ctx.currentApproved)) return fail('permission', "only a Goat LP permission is removed; another app's approval is left alone");
+    } else if (planEarlier) {
+      return fail('permission', 'the earlier contracts get no new permission');
     } else {
       const want = spenderFor(ctx.kind, ctx.venue, ctx.spenders);
       if (!want || !eq(want, spender)) return fail('permission', ctx.kind === 'compound' && ctx.venue === 'v4'
@@ -278,16 +329,20 @@ export function assertAutomationTx(tx: AutomationTx, ctx: GuardCtx): AutomationV
         }
       } else if (x.functionName === 'approve') {
         if (!isZero(x.args?.[0] as string) || (x.args?.[1] as bigint) !== ctx.tokenId) return fail('multicall', 'only approve(0, this position) may sit in the multicall');
-        if (!isGoatSpender(ctx.currentApproved ?? null, ctx.spenders)) return fail('multicall', "only a Goat LP permission is removed; another app's approval is left alone");
+        if (!isAnyGoatSpender(ctx.currentApproved)) return fail('multicall', "only a Goat LP permission is removed; another app's approval is left alone");
       } else return fail('multicall', `${x.functionName} is not allowed in the multicall`);
     }
   }
-  if (target !== 'npm' && target !== 'posm') {
-    const cfg = checkConfig(target, d.functionName, d.args, ctx);
+  if (isRule) {
+    const key = target as ContractKey;
+    const cfg = checkConfig(key, d.functionName, d.args, ctx);
     if (!cfg.ok) return fail(cfg.rule, cfg.reason);
-    if (turnsOn(target, d.functionName, d.args)) {
-      if (ctx.treasuryOk?.[target] !== true) return fail('fee-recipient', 'the fee recipient is not the Goat LP treasury');
-      const k = kindOfCall(target, d.functionName, ctx.kind);
+    const on = turnsOn(key, d.functionName, d.args);
+    if (on && hit.earlier) return fail('target', 'the earlier contracts take no new rules');
+    if (on && kindOfCall(key, d.functionName, ctx.kind) === 'range' && !(ctx.rangeOpen ?? AUTO_RANGE_OPEN)) return fail('rule-limits', RANGE_PORT_CLOSED);
+    if (on) {
+      if (ctx.treasuryOk?.[key] !== true) return fail('fee-recipient', 'the fee recipient is not the Goat LP treasury');
+      const k = kindOfCall(key, d.functionName, ctx.kind);
       if (k !== ctx.kind) return fail('position', 'the call is for another automation than the one planned');
       const other = otherActive(ctx, k);
       if (other) return fail('one-automation', other);

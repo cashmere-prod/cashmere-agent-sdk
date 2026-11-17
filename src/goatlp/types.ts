@@ -109,6 +109,8 @@ export interface PositionFacts {
   /** getApproved(id); null = none */
   approved?: Maybe<Address | null>;
   rules?: Partial<Record<Kind, Maybe<RuleRead | null>>>;
+  /** rules saved on the earlier Goat LP contracts (r3), which no longer run them: read and stopped only */
+  earlierRules?: Partial<Record<Kind, Maybe<RuleRead | null>>>;
   /** v4 Steward previewTrigger(id) */
   preview?: Maybe<{ ready: boolean; upperSide: boolean; reason: Hex }>;
   /** v3 positions(): the pool tokens and fee; v4: the pool key */
