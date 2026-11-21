@@ -1,4 +1,4 @@
-// The build as published before the switch values are filled (no preload): every r4 value is a placeholder, so no rule is
+// The build as published before the switch values are filled (preload ./__fixtures__/r4-unfilled.ts): every r4 value is a placeholder, so no rule is
 // turned on and no placeholder address is read; the earlier contracts are read and their rules are stopped.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
